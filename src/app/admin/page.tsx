@@ -338,7 +338,7 @@ export default function AdminPage() {
               <div>
                 <span className="font-bold text-white block">Google GenAI Engine</span>
                 <span className="text-gray-500">
-                  gemini-nano-banana-2.1 &amp; gemini-3-pro-image
+                  gemini-3.1-flash-image, gemini-3.1-flash-lite-image &amp; gemini-3-pro-image
                 </span>
               </div>
               <span

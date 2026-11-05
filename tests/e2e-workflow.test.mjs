@@ -81,7 +81,7 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
     const genBody = await genRes.json();
     assert.equal(genBody.success, true);
     assert.equal(genBody.data.remainingCredits, 4);
-    assert.equal(genBody.data.modelUsed, 'gemini-nano-banana-2.1');
+    assert.equal(genBody.data.modelUsed, 'gemini-3.1-flash-image');
     assert.equal(genBody.data.fidelityVerified, true);
     assert.ok(genBody.data.fidelityScore >= 0.95);
 
@@ -166,3 +166,4 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
     assert.equal(metrics.recentAuditLogs.length, 1);
   });
 });
+

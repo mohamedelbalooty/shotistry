@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS "PromptVersion" (
   "version" INTEGER NOT NULL DEFAULT 1,
   "basePrompt" TEXT NOT NULL,
   "negPrompt" TEXT,
-  "modelTarget" TEXT NOT NULL DEFAULT 'gemini-nano-banana-2.1',
+  "modelTarget" TEXT NOT NULL DEFAULT 'gemini-3.1-flash-image',
   "isCurrent" INTEGER NOT NULL DEFAULT 1,
   "createdAt" TEXT NOT NULL,
   FOREIGN KEY ("templateId") REFERENCES "PromptTemplate"("id") ON DELETE CASCADE
@@ -320,3 +320,4 @@ export async function withSerializableTransaction<T>(
     releaseMutex();
   }
 }
+

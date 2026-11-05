@@ -126,7 +126,7 @@ CREATE TABLE "PromptVersion" (
     "version" INTEGER NOT NULL DEFAULT 1,
     "basePrompt" TEXT NOT NULL,
     "negPrompt" TEXT,
-    "modelTarget" TEXT NOT NULL DEFAULT 'gemini-nano-banana-2.1',
+    "modelTarget" TEXT NOT NULL DEFAULT 'gemini-3.1-flash-image',
     "isCurrent" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

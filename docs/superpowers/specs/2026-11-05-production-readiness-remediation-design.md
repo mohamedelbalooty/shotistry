@@ -16,7 +16,7 @@
      2. Performs foreground product isolation (alpha matting / background segmentation to extract the product foreground mask and bounding box).
      3. Computes a verifiable **Foreground Pixel Preservation Score** (`fidelityScore`: `0.0` to `1.0`) by comparing the isolated product foreground pixels against the final composited output.
    - In **`GeminiClient` (`src/lib/ai/gemini-client.ts`)**:
-     - Target official active Gemini Interactions API models (`gemini-nano-banana-2.1` default, `gemini-3-pro-image` for 4K studio pro, `gemini-3.1-flash-lite-image` for fast previews) via `ai.interactions.create`, passing the actual customer product image (`{ type: 'image', mime_type, data }`), isolated foreground mask/reference, synthesized studio prompt, and `response_format: { type: 'image', aspect_ratio, image_size }`.
+     - Target official active Gemini Interactions API models (`gemini-3.1-flash-image` default, `gemini-3-pro-image` for 4K studio pro, `gemini-3.1-flash-lite-image` for fast previews) via `ai.interactions.create`, passing the actual customer product image (`{ type: 'image', mime_type, data }`), isolated foreground mask/reference, synthesized studio prompt, and `response_format: { type: 'image', mime_type, aspect_ratio, image_size }`.
      - When `GEMINI_API_KEY` is configured and live, execute the live Gemini Interactions API call, then composite/verify the original product foreground to guarantee logo and label preservation, reporting `executionMode: 'LIVE_GEMINI_API'` and `synthIdDetected: true`.
      - When `GEMINI_API_KEY` is absent or in local/sandbox mode, execute the **Local Studio Compositor (`executionMode: 'LOCAL_COMPOSITE_SANDBOX'`)**: procedurally render the preset's studio lighting environment, horizon, pedestal, and contact shadow, and composite the **actual isolated customer product pixels** onto the studio scene, returning a valid PNG data URL containing the user's real product, with `synthIdDetected: false` (never claiming SynthID on non-Gemini outputs!).
 
@@ -56,3 +56,4 @@
    - Refactor `GET /api/admin/metrics` to query real PostgreSQL aggregates from `User`, `Workspace`, `Subscription`, `PaymentTransaction`, `GenerationJob`, `CreditLedger`, and `AdminAuditLog` — zero hardcoded demo constants.
    - Implement `POST /api/admin/credits/adjust` requiring admin authorization, atomically inserting an `ADMIN_ADJUSTMENT` ledger record and an `AdminAuditLog` row (`adminId`, `action`, `targetType`, `targetId`, `metadata`).
    - Refactor `src/app/admin/page.tsx` to load live data from `GET /api/admin/metrics` and submit credit adjustments to `POST /api/admin/credits/adjust`.
+

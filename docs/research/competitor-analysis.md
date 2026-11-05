@@ -19,7 +19,7 @@ We evaluated the primary global and regional solutions operating in the AI produ
 ### Pain Point 1: Product Distortion and Label Hallucination
 - **The Issue:** Generative image models (when prompted with text alone or weak image guidance) often reimagine the product, hallucinate foreign typography on bottles, alter packaging colors, or bend geometric product lines.
 - **Customer Frustration:** Merchants complain that they cannot use generated photos on Salla or Amazon because customers complain that the delivered product looks different from the photograph.
-- **Shotistry Advantage:** Dual-layer generation pipeline combining sharp segmentation masking with Google Imagen 3 inpainting and Gemini multimodal conditioning to protect original product pixels 100% intact.
+- **Shotistry Advantage:** Dual-layer generation pipeline combining Sharp segmentation masking with Google Gemini Interactions API (`gemini-3.1-flash-image` / `gemini-3-pro-image`) multimodal reference conditioning to protect original product pixels 100% intact.
 
 ### Pain Point 2: Lack of Regional Payment Gateways
 - **The Issue:** Pebblely, Flair, and Photoroom exclusively process international Stripe/Paddle USD checkouts.

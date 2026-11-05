@@ -4,7 +4,7 @@
 
 **Goal:** Remediate all CRITICAL and HIGH production-readiness audit findings across database persistence, atomic credit ledger, real product-image transformation & compositing, Gemini Nano Banana 2.1 integration, fail-closed idempotent Paymob webhooks, and real database-backed admin telemetry.
 
-**Architecture:** Next.js 15 App Router + TypeScript strict mode + PostgreSQL via Prisma ORM (`@prisma/client`) with `SERIALIZABLE` / row-locking ledger transactions, pure-Node PNG/JPEG pixel isolation & studio compositing pipeline paired with `@google/genai` Interactions API (`gemini-nano-banana-2.1`), HMAC-SHA512 fail-closed webhook processing, and signed asset URLs.
+**Architecture:** Next.js 15 App Router + TypeScript strict mode + PostgreSQL via Prisma ORM (`@prisma/client`) with `SERIALIZABLE` / `SELECT FOR UPDATE` row-locking ledger transactions, Sharp (`libvips`) PNG/JPEG/WebP pixel isolation & studio compositing pipeline paired with `@google/genai` Interactions API (`gemini-3.1-flash-image`), HMAC-SHA512 fail-closed webhook processing, and signed asset URLs.
 
 ---
 
@@ -29,7 +29,7 @@
   - Test: `tests/image-pipeline.test.mjs`, `tests/gemini-client.test.mjs`, `tests/prompt-synthesizer.test.mjs`
 - **Behavioral Expectations:**
   - `image-processor.ts` decodes uploaded product images (PNG/JPEG/BMP/SVG data URLs), extracts a real foreground alpha mask by isolating non-background pixels, composites the exact customer product pixels onto a studio lighting/pedestal/contact-shadow canvas, and computes a real pixel-level `fidelityScore` (`0.0–1.0`).
-  - `PromptSynthesizer` defaults to `gemini-nano-banana-2.1` (and supports `gemini-3-pro-image` and `gemini-3.1-flash-lite-image`).
+  - `PromptSynthesizer` defaults to `gemini-3.1-flash-image` (and supports `gemini-3-pro-image` and `gemini-3.1-flash-lite-image`).
   - `GeminiClient` requires and uses `referenceImageBase64`, maps aspect ratios accurately (`1:1` -> `1024x1024`, `4:5` -> `1080x1350`, `9:16` -> `1080x1920`, `16:9` -> `1920x1080`), calls `ai.interactions.create` when a live API key is configured, and runs the real pixel compositor in sandbox mode with `synthIdDetected: false` and `executionMode: 'LOCAL_COMPOSITE_SANDBOX'`.
 - **TDD Validation:**
   - Write failing tests in `tests/image-pipeline.test.mjs`, `tests/gemini-client.test.mjs`, and `tests/prompt-synthesizer.test.mjs` (RED), implement changes (GREEN).
@@ -85,4 +85,5 @@
   - Modify: `AGENTS.md`, `project-status.md`, `README.md`, `risk-register.md`, `CHANGELOG.md`, `docs/ai/*`, `docs/architecture/*`, `docs/business/pricing-strategy.md`, `docs/payments/*`, `docs/qa/*`
 - **Behavioral Expectations:**
   - Full test suite (`npm test`), typecheck (`npx tsc --noEmit`), production build (`npm run build`), and live HTTP server E2E workflow pass with 0 errors.
-  - All documentation accurately reflects active Gemini Nano Banana models (`gemini-nano-banana-2.1`, `gemini-3-pro-image`, `gemini-3.1-flash-lite-image`, `gemini-3.8-flash`) and distinguishes unit, integration, E2E, and live credential tests.
+  - All documentation accurately reflects active official Gemini Interactions API models (`gemini-3.1-flash-image`, `gemini-3-pro-image`, `gemini-3.1-flash-lite-image`, `gemini-3.8-flash`) and distinguishes unit, contract, integration, E2E, and live credential tests.
+

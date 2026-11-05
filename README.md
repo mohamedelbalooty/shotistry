@@ -7,7 +7,7 @@
 
 ## 🚀 Key Highlights & Architectural Strengths
 
-- **AI Engine:** Powered by Google Gemini Nano Banana models (`gemini-nano-banana-2.1`, `gemini-3-pro-image`, `gemini-3.1-flash-lite-image`) via `@google/genai` (`ai.interactions.create`) paired with real foreground alpha-mask segmentation, studio pedestal/contact-shadow compositing, and quantitative foreground pixel-preservation verification (`src/lib/ai/image-processor.ts`).
+- **AI Engine:** Powered by official Google Gemini Interactions API image models (`gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, `gemini-3-pro-image`) via `@google/genai` (`ai.interactions.create`) paired with Sharp (`libvips`) PNG/JPEG/WebP pixel decoding, foreground alpha-mask segmentation, studio pedestal/contact-shadow compositing, and quantitative foreground pixel-preservation verification (`src/lib/ai/image-processor.ts`).
 - **Regionalized Payments:** Deep integration with **Paymob**, supporting local recurring subscriptions and top-up packages in **Egyptian Pounds (EGP)** (Visa, Mastercard, Meeza, Mobile Wallets) and **Saudi Riyals (SAR)** (Mada, Apple Pay, Cards).
 - **Double-Entry Credit Ledger:** Auditable financial accounting system with 3-phase atomic reservation (`RESERVE` $\to$ `SETTLE` / `RELEASE`), eliminating concurrency race conditions and credit loss.
 - **Bilingual Experience:** Native Arabic RTL and English LTR user interface tailored with regional typography (`Cairo`), cultural presets (Gulf Luxury, Ramadan & Eid, Desert Dunes, Modern Cairo Boutique), and instant multi-aspect exports (Salla, Zid, Instagram, TikTok).
@@ -19,7 +19,7 @@
 
 - `docs/research/`: Market research, competitor benchmarking (Pebblely, Flair, Photoroom, Laqta), customer personas, and verified source register.
 - `docs/business/`: Business model, localized pricing strategy, unit economics, profitability analysis, and 18-month financial forecast.
-- `docs/ai/`: Gemini Nano Banana (`gemini-nano-banana-2.1`, `gemini-3-pro-image`, `gemini-3.1-flash-lite-image`) model evaluation, cost tracking, prompt synthesizer architecture, regional preset library, and product fidelity strategy.
+- `docs/ai/`: Official Gemini Interactions API image models (`gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, `gemini-3-pro-image`) evaluation, cost tracking, prompt synthesizer architecture, regional preset library, and product fidelity strategy.
 - `docs/audit/`: Independent production-readiness audit report, evidence register, and TDD remediation verification.
 - `docs/payments/`: Paymob API research, HMAC-SHA512 webhook security, recurring subscription state machine, and payment architecture.
 - `docs/architecture/`: System architecture, Prisma database schema, REST API specifications, and Architecture Decision Records (ADRs).

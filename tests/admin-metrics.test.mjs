@@ -101,7 +101,7 @@ describe('Admin Metrics & Audited Credit Adjustments (Real SQL Aggregates)', () 
     assert.equal(metrics.totalImagesGenerated, 1);
     assert.equal(metrics.generationSuccessRate, 100);
     assert.equal(metrics.recentJobs.length, 1);
-    assert.equal(metrics.recentJobs[0].model, 'gemini-nano-banana-2.1');
+    assert.equal(metrics.recentJobs[0].model, 'gemini-3.1-flash-image');
   });
 
   test('executes audited credit adjustments and writes immutable AdminAuditLog in SQL', async () => {
@@ -146,3 +146,4 @@ describe('Admin Metrics & Audited Credit Adjustments (Real SQL Aggregates)', () 
     assert.equal(details.reason, 'SLA compensation for campaign shoot');
   });
 });
+

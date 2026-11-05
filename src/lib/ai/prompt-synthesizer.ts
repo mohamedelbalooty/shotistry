@@ -5,21 +5,23 @@ import type {
 } from '../types/index.ts';
 import { getPresetById } from './presets.ts';
 
-export const DEFAULT_GEMINI_IMAGE_MODEL: GeminiImageModelId = 'gemini-nano-banana-2.1';
+export const DEFAULT_GEMINI_IMAGE_MODEL: GeminiImageModelId = 'gemini-3.1-flash-image';
 
 export const SUPPORTED_GEMINI_IMAGE_MODELS: readonly GeminiImageModelId[] = [
-  'gemini-nano-banana-2.1',
-  'gemini-3-pro-image',
+  'gemini-3.1-flash-image',
   'gemini-3.1-flash-lite-image',
+  'gemini-3-pro-image',
 ] as const;
 
 /**
- * Normalizes any model identifier (including shut-down Imagen 3/4 or deprecated
- * Gemini 2.5 Flash Image IDs) to an active, supported Gemini Nano Banana model.
+ * Normalizes any model identifier (including marketing aliases like `gemini-nano-banana-2.1`,
+ * shut-down Imagen 3/4 IDs, or deprecated `gemini-2.5-flash-image`) to an officially
+ * documented Google Gemini Interactions API model identifier.
  */
 export function normalizeGeminiImageModel(model?: string): GeminiImageModelId {
   if (model === 'gemini-3-pro-image') return 'gemini-3-pro-image';
   if (model === 'gemini-3.1-flash-lite-image') return 'gemini-3.1-flash-lite-image';
+  if (model === 'gemini-3.1-flash-image') return 'gemini-3.1-flash-image';
   return DEFAULT_GEMINI_IMAGE_MODEL;
 }
 

@@ -62,7 +62,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             thumbnailUrl: String(j.imageUrl),
             aspectRatio: (j.aspectRatio as GenerationResult['aspectRatio']) || '1:1',
             resolution: String(j.resolution || '1024x1024'),
-            modelUsed: String(j.modelUsed || 'gemini-nano-banana-2.1'),
+            modelUsed: String(j.modelUsed || 'gemini-3.1-flash-image'),
             executionMode:
               (j.executionMode as GenerationResult['executionMode']) ||
               'LOCAL_COMPOSITE_SANDBOX',

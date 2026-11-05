@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PromptSynthesizer,
   DEFAULT_GEMINI_IMAGE_MODEL,
+  SUPPORTED_GEMINI_IMAGE_MODELS,
   normalizeGeminiImageModel,
 } from '../src/lib/ai/prompt-synthesizer.ts';
 import { REGIONAL_PHOTOSHOOT_PRESETS, getPresetById } from '../src/lib/ai/presets.ts';
@@ -16,7 +17,7 @@ describe('Commercial Prompt Synthesizer Tests', () => {
     assert.ok(gulfLuxury.nameAr.includes('الفخامة الخليجية'));
   });
 
-  it('should synthesize full 10-component prompt for Gulf Luxury Perfume Shoot with active default model gemini-nano-banana-2.1', () => {
+  it('should synthesize full 10-component prompt for Gulf Luxury Perfume Shoot with official default model gemini-3.1-flash-image', () => {
     const result = PromptSynthesizer.synthesize({
       productTitle: 'Royal Oud Parfum',
       productCategory: 'Fragrances',
@@ -34,15 +35,40 @@ describe('Commercial Prompt Synthesizer Tests', () => {
     assert.ok(result.fullPrompt.includes('Physics & Grounding:'));
     assert.ok(result.fullPrompt.includes('Preserve 100% original product geometry'));
     assert.strictEqual(result.aspectRatio, '1:1');
-    assert.strictEqual(result.targetModel, 'gemini-nano-banana-2.1');
-    assert.strictEqual(DEFAULT_GEMINI_IMAGE_MODEL, 'gemini-nano-banana-2.1');
+    assert.strictEqual(result.targetModel, 'gemini-3.1-flash-image');
+    assert.strictEqual(DEFAULT_GEMINI_IMAGE_MODEL, 'gemini-3.1-flash-image');
+    assert.deepStrictEqual(SUPPORTED_GEMINI_IMAGE_MODELS, [
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-lite-image',
+      'gemini-3-pro-image',
+    ]);
   });
 
-  it('should normalize shut-down Imagen 3/4 and deprecated Flash Image IDs to gemini-nano-banana-2.1', () => {
-    assert.strictEqual(normalizeGeminiImageModel('imagen-3.0-generate-002'), 'gemini-nano-banana-2.1');
-    assert.strictEqual(normalizeGeminiImageModel('imagen-4.0-generate-001'), 'gemini-nano-banana-2.1');
-    assert.strictEqual(normalizeGeminiImageModel('gemini-2.5-flash-image'), 'gemini-nano-banana-2.1');
-    assert.strictEqual(normalizeGeminiImageModel('gemini-3-pro-image'), 'gemini-3-pro-image');
+  it('should normalize marketing aliases (gemini-nano-banana-2.1), shut-down Imagen 3/4, and deprecated Flash Image IDs to gemini-3.1-flash-image', () => {
+    assert.strictEqual(
+      normalizeGeminiImageModel('gemini-nano-banana-2.1'),
+      'gemini-3.1-flash-image'
+    );
+    assert.strictEqual(
+      normalizeGeminiImageModel('imagen-3.0-generate-002'),
+      'gemini-3.1-flash-image'
+    );
+    assert.strictEqual(
+      normalizeGeminiImageModel('imagen-4.0-generate-001'),
+      'gemini-3.1-flash-image'
+    );
+    assert.strictEqual(
+      normalizeGeminiImageModel('gemini-2.5-flash-image'),
+      'gemini-3.1-flash-image'
+    );
+    assert.strictEqual(
+      normalizeGeminiImageModel('gemini-3.1-flash-image'),
+      'gemini-3.1-flash-image'
+    );
+    assert.strictEqual(
+      normalizeGeminiImageModel('gemini-3-pro-image'),
+      'gemini-3-pro-image'
+    );
     assert.strictEqual(
       normalizeGeminiImageModel('gemini-3.1-flash-lite-image'),
       'gemini-3.1-flash-lite-image'

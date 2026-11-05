@@ -105,3 +105,4 @@ export function readStoredAsset(key: string): { buffer: Buffer; mimeType: string
       : 'image/png';
   return { buffer, mimeType };
 }
+

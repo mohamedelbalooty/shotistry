@@ -190,7 +190,7 @@ model PromptVersion {
   version     Int             @default(1)
   basePrompt  String          @db.Text
   negPrompt   String?         @db.Text
-  modelTarget String          @default("gemini-nano-banana-2.1")
+  modelTarget String          @default("gemini-3.1-flash-image")
   isCurrent   Boolean         @default(true)
   createdAt   DateTime        @default(now())
 

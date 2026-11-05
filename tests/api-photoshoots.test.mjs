@@ -66,7 +66,7 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     assert.equal(body.success, true);
     assert.equal(body.data.aspectRatio, '4:5');
     assert.equal(body.data.resolution, '1080x1350');
-    assert.equal(body.data.modelUsed, 'gemini-nano-banana-2.1');
+    assert.equal(body.data.modelUsed, 'gemini-3.1-flash-image');
     assert.equal(body.data.creditsCharged, 1);
     assert.equal(body.data.remainingCredits, 4); // 5 initial trial - 1 settled
     assert.equal(body.data.fidelityVerified, true);
@@ -184,3 +184,4 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     assert.equal(expiredCheck.valid, false);
   });
 });
+

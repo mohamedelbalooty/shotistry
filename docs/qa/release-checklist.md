@@ -1,26 +1,13 @@
-# Pre-Production Release & Launch Checklist
+# Pre-Production Release Checklist
 
-## Phase Sign-Off Gate
-Before deploying to production and declaring completion:
+## 1. AI & Product Fidelity Gate
+- [x] Official `@google/genai` SDK configured with official Gemini Interactions API model identifiers (`gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, `gemini-3-pro-image`) — **PASS (`UNIT TESTED` + `CONTRACT TESTED`)**.
+- [x] Marketing alias `gemini-nano-banana-2.1` and shut-down Imagen 3/4 identifiers removed from API requests and normalized to `gemini-3.1-flash-image` — **PASS (`UNIT TESTED`)**.
+- [x] Real PNG, JPEG, and WebP pixel decoding implemented via `sharp` (`libvips`) with phone-camera EXIF orientation normalization and zero SHA-256 hash synthesis — **PASS (`INTEGRATION TESTED`)**.
+- [ ] Live `GEMINI_API_KEY` network smoke test (`tests/live-external-smoke.test.mjs`) — **BLOCKED (`NOT TESTED` — requires external `GEMINI_API_KEY`)**.
 
-### 1. Business & Monetization
-- [x] Dual-currency pricing validated (EGP & SAR) with 70%+ gross margin target.
-- [x] Paymob integration plan verified for Egypt and Saudi Arabia.
-- [x] Double-entry credit ledger prevents race conditions and overspending.
-
-### 2. AI & Product Quality
-- [x] Official `@google/genai` SDK configured with Imagen 3 / Gemini 2.5 Flash routing.
-- [x] Curated regional photoshoot prompt library implemented.
-- [x] Dual-stage mask-guided inpainting architecture designed for 100% product fidelity.
-
-### 3. Engineering & Security
-- [x] Strict TypeScript build checks with zero errors.
-- [x] All database mutations run inside ACID transactions.
-- [x] Paymob HMAC-SHA512 verification active on webhook receiver.
-- [x] Environment variable schema validated with zero hardcoded credentials.
-
-### 4. User Experience & Localization
-- [x] Bilingual English & Arabic layout with native RTL typography.
-- [x] Responsive layout tested for mobile, tablet, and desktop viewports.
-- [x] Clear loading and error states with user-friendly Arabic copy.
-
+## 2. Database, Ledger & Billing Gate
+- [x] PostgreSQL migration (`prisma/migrations/20261105000000_init/migration.sql`) applied and verified against real PostgreSQL (`shotistry_audit_test`) — **PASS (`INTEGRATION TESTED`)**.
+- [x] `PostgresCreditLedgerService` verified for reservation, settlement, release, and 5-way concurrent double-spend prevention (`SERIALIZABLE` + `SELECT ... FOR UPDATE`) — **PASS (`INTEGRATION TESTED`)**.
+- [x] Paymob webhook fails closed when `PAYMOB_HMAC_SECRET` is missing (`503`) or invalid (`401`) and processes signed webhooks idempotently — **PASS (`INTEGRATION TESTED`)**.
+- [ ] Live Paymob Sandbox network checkout session test — **BLOCKED (`NOT TESTED` — requires external `PAYMOB_SECRET_KEY` / `PAYMOB_API_KEY`)**.

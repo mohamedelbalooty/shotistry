@@ -1,12 +1,12 @@
 import zlib from 'node:zlib';
-import crypto from 'node:crypto';
-import type { AspectRatio } from '../types/index.ts';
+import sharp from 'sharp';
+import type { AspectRatio, SupportedImageMimeType } from '../types/index.ts';
 
 export interface DecodedRgbaImage {
   width: number;
   height: number;
   pixels: Uint8Array; // RGBA (width * height * 4)
-  mimeType: string;
+  mimeType: SupportedImageMimeType;
 }
 
 export interface ProductBoundingBox {
@@ -144,188 +144,259 @@ function paethPredictor(a: number, b: number, c: number): number {
 }
 
 /**
- * Parses a base64 or Data URL string into raw bytes and MIME type.
+ * Detects the image MIME type from binary magic bytes (`PNG`, `JPEG`, `WebP`).
+ * Throws a descriptive validation error for unsupported formats (`HEIC`, `GIF`, `PDF`, etc.).
  */
-export function parseImageInput(input: string): { buffer: Buffer; mimeType: string } {
+export function detectSupportedImageMimeType(
+  buffer: Buffer,
+  declaredMime?: string
+): SupportedImageMimeType {
+  if (declaredMime) {
+    const cleanMime = declaredMime.toLowerCase().trim();
+    if (
+      cleanMime !== 'image/png' &&
+      cleanMime !== 'image/jpeg' &&
+      cleanMime !== 'image/jpg' &&
+      cleanMime !== 'image/pjpeg' &&
+      cleanMime !== 'image/webp'
+    ) {
+      throw new Error(
+        `Unsupported image format "${cleanMime}". Supported product image formats are PNG (image/png), JPEG (image/jpeg), and WebP (image/webp).`
+      );
+    }
+  }
+
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    return 'image/png';
+  }
+
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.toString('ascii', 4, 8) === 'ftyp'
+  ) {
+    const brand = buffer.toString('ascii', 8, 12);
+    throw new Error(
+      `Unsupported image format (ISO BMFF/${brand}). Please convert HEIC/AVIF files to PNG, JPEG, or WebP before uploading.`
+    );
+  }
+
+  throw new Error(
+    'Unsupported image signature. Supported product image formats are PNG (image/png), JPEG (image/jpeg), and WebP (image/webp).'
+  );
+}
+
+/**
+ * Parses a base64 or Data URL string into raw bytes and verified MIME type (`image/png`, `image/jpeg`, `image/webp`).
+ */
+export function parseImageInput(input: string): {
+  buffer: Buffer;
+  mimeType: SupportedImageMimeType;
+} {
   if (!input || typeof input !== 'string' || input.trim().length < 16) {
     throw new Error('Invalid or empty product image payload');
   }
   const trimmed = input.trim();
-  const match = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
-  if (match) {
-    const buffer = Buffer.from(match[2], 'base64');
-    if (buffer.length < 16) {
+  const dataUrlMatch = trimmed.match(/^data:([a-zA-Z0-9.+/-]+);base64,(.+)$/s);
+  if (dataUrlMatch) {
+    const declaredMime = dataUrlMatch[1].toLowerCase();
+    const buffer = Buffer.from(dataUrlMatch[2], 'base64');
+    if (buffer.length < 12) {
       throw new Error('Decoded product image buffer is too small');
     }
-    return { buffer, mimeType: match[1].toLowerCase() };
+    const mimeType = detectSupportedImageMimeType(buffer, declaredMime);
+    return { buffer, mimeType };
   }
 
   const buffer = Buffer.from(trimmed, 'base64');
-  if (buffer.length < 16) {
+  if (buffer.length < 12) {
     throw new Error('Invalid base64 product image data');
   }
-  const isPng = buffer.subarray(0, 8).equals(PNG_SIGNATURE);
-  const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8;
-  return {
-    buffer,
-    mimeType: isPng ? 'image/png' : isJpeg ? 'image/jpeg' : 'image/png',
-  };
+  const mimeType = detectSupportedImageMimeType(buffer);
+  return { buffer, mimeType };
 }
 
 /**
- * Decodes a PNG (8-bit RGB, RGBA, Grayscale, Grayscale+Alpha, or Palette) into RGBA pixels.
- * For non-PNG inputs (e.g. JPEG/WebP uploaded from phone cameras), extracts deterministic
- * color & geometry signatures from the image payload so every distinct product upload
- * produces a deterministic, distinct RGBA representation.
+ * Decodes a real PNG, JPEG, or WebP product image into raw 8-bit RGBA pixels using Sharp (libvips).
+ * - Automatically applies phone-camera EXIF orientation tags via `.rotate()`.
+ * - Preserves real image pixels with zero synthetic hash fallbacks.
+ * - Throws descriptive errors for unsupported formats or corrupt image streams.
+ */
+export async function decodeProductImage(input: string): Promise<DecodedRgbaImage> {
+  const { buffer, mimeType } = parseImageInput(input);
+
+  try {
+    const { data, info } = await sharp(buffer, { failOn: 'error' })
+      .rotate() // Auto-orient phone-camera EXIF rotation
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    if (
+      !info.width ||
+      !info.height ||
+      info.width < 4 ||
+      info.height < 4 ||
+      info.channels !== 4 ||
+      data.length !== info.width * info.height * 4
+    ) {
+      throw new Error('Decoded RGBA pixel buffer dimensions are invalid');
+    }
+
+    return {
+      width: info.width,
+      height: info.height,
+      pixels: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+      mimeType,
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`Corrupt or unreadable product image (${mimeType}): ${detail}`);
+  }
+}
+
+/**
+ * Synchronous PNG decoder for raw 8-bit PNG buffers (used when synchronously inspecting PNG masks/outputs).
+ * Never synthesizes fake images from hashes; throws if given non-PNG or corrupt PNG input.
  */
 export function decodePngDataUrl(input: string): DecodedRgbaImage {
   const { buffer, mimeType } = parseImageInput(input);
+  if (mimeType !== 'image/png' || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    throw new Error(
+      `decodePngDataUrl requires a valid PNG input (received ${mimeType}). Use await decodeProductImage() for PNG, JPEG, and WebP.`
+    );
+  }
 
-  if (buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    let offset = 8;
-    let width = 0;
-    let height = 0;
-    let bitDepth = 8;
-    let colorType = 6;
-    let interlace = 0;
-    let palette: Buffer | null = null;
-    let trns: Buffer | null = null;
-    const idatChunks: Buffer[] = [];
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 8;
+  let colorType = 6;
+  let interlace = 0;
+  let palette: Buffer | null = null;
+  let trns: Buffer | null = null;
+  const idatChunks: Buffer[] = [];
 
-    while (offset + 8 <= buffer.length) {
-      const length = buffer.readUInt32BE(offset);
-      const type = buffer.toString('ascii', offset + 4, offset + 8);
-      const dataStart = offset + 8;
-      const dataEnd = dataStart + length;
-      if (dataEnd > buffer.length) break;
-      const chunkData = buffer.subarray(dataStart, dataEnd);
+  while (offset + 8 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd > buffer.length) break;
+    const chunkData = buffer.subarray(dataStart, dataEnd);
 
-      if (type === 'IHDR') {
-        width = chunkData.readUInt32BE(0);
-        height = chunkData.readUInt32BE(4);
-        bitDepth = chunkData[8];
-        colorType = chunkData[9];
-        interlace = chunkData[12];
-      } else if (type === 'PLTE') {
-        palette = Buffer.from(chunkData);
-      } else if (type === 'tRNS') {
-        trns = Buffer.from(chunkData);
-      } else if (type === 'IDAT') {
-        idatChunks.push(chunkData);
-      } else if (type === 'IEND') {
-        break;
-      }
-      offset = dataEnd + 4; // skip CRC
+    if (type === 'IHDR') {
+      width = chunkData.readUInt32BE(0);
+      height = chunkData.readUInt32BE(4);
+      bitDepth = chunkData[8];
+      colorType = chunkData[9];
+      interlace = chunkData[12];
+    } else if (type === 'PLTE') {
+      palette = Buffer.from(chunkData);
+    } else if (type === 'tRNS') {
+      trns = Buffer.from(chunkData);
+    } else if (type === 'IDAT') {
+      idatChunks.push(chunkData);
+    } else if (type === 'IEND') {
+      break;
     }
+    offset = dataEnd + 4;
+  }
 
-    if (width > 0 && height > 0 && idatChunks.length > 0 && bitDepth === 8 && interlace === 0) {
-      try {
-        const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
-        const channels =
-          colorType === 6
-            ? 4
-            : colorType === 2
-              ? 3
-              : colorType === 4
-                ? 2
-                : colorType === 0 || colorType === 3
-                  ? 1
-                  : 4;
-        const bpp = channels;
-        const stride = width * bpp;
-        const expectedLen = (stride + 1) * height;
+  if (width <= 0 || height <= 0 || idatChunks.length === 0 || bitDepth !== 8 || interlace !== 0) {
+    throw new Error('Unsupported or corrupt PNG structure for synchronous decode');
+  }
 
-        if (inflated.length >= expectedLen) {
-          const recon = new Uint8Array(width * height * bpp);
-          for (let y = 0; y < height; y++) {
-            const filterType = inflated[y * (stride + 1)];
-            const scanlineStart = y * (stride + 1) + 1;
-            const rowOut = y * stride;
-            const prevRowOut = (y - 1) * stride;
+  const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
+  const channels =
+    colorType === 6
+      ? 4
+      : colorType === 2
+        ? 3
+        : colorType === 4
+          ? 2
+          : colorType === 0 || colorType === 3
+            ? 1
+            : 4;
+  const bpp = channels;
+  const stride = width * bpp;
+  const expectedLen = (stride + 1) * height;
 
-            for (let i = 0; i < stride; i++) {
-              const rawByte = inflated[scanlineStart + i];
-              const a = i >= bpp ? recon[rowOut + i - bpp] : 0;
-              const b = y > 0 ? recon[prevRowOut + i] : 0;
-              const c = y > 0 && i >= bpp ? recon[prevRowOut + i - bpp] : 0;
+  if (inflated.length < expectedLen) {
+    throw new Error('Corrupt PNG IDAT stream: inflated scanlines shorter than expected');
+  }
 
-              let val = rawByte;
-              if (filterType === 1) val = (rawByte + a) & 0xff;
-              else if (filterType === 2) val = (rawByte + b) & 0xff;
-              else if (filterType === 3) val = (rawByte + ((a + b) >> 1)) & 0xff;
-              else if (filterType === 4) val = (rawByte + paethPredictor(a, b, c)) & 0xff;
+  const recon = new Uint8Array(width * height * bpp);
+  for (let y = 0; y < height; y++) {
+    const filterType = inflated[y * (stride + 1)];
+    const scanlineStart = y * (stride + 1) + 1;
+    const rowOut = y * stride;
+    const prevRowOut = (y - 1) * stride;
 
-              recon[rowOut + i] = val;
-            }
-          }
+    for (let i = 0; i < stride; i++) {
+      const rawByte = inflated[scanlineStart + i];
+      const a = i >= bpp ? recon[rowOut + i - bpp] : 0;
+      const b = y > 0 ? recon[prevRowOut + i] : 0;
+      const c = y > 0 && i >= bpp ? recon[prevRowOut + i - bpp] : 0;
 
-          const rgba = new Uint8Array(width * height * 4);
-          for (let p = 0; p < width * height; p++) {
-            const outIdx = p * 4;
-            if (colorType === 6) {
-              rgba[outIdx] = recon[p * 4];
-              rgba[outIdx + 1] = recon[p * 4 + 1];
-              rgba[outIdx + 2] = recon[p * 4 + 2];
-              rgba[outIdx + 3] = recon[p * 4 + 3];
-            } else if (colorType === 2) {
-              rgba[outIdx] = recon[p * 3];
-              rgba[outIdx + 1] = recon[p * 3 + 1];
-              rgba[outIdx + 2] = recon[p * 3 + 2];
-              rgba[outIdx + 3] = 255;
-            } else if (colorType === 4) {
-              rgba[outIdx] = recon[p * 2];
-              rgba[outIdx + 1] = recon[p * 2];
-              rgba[outIdx + 2] = recon[p * 2];
-              rgba[outIdx + 3] = recon[p * 2 + 1];
-            } else if (colorType === 0) {
-              rgba[outIdx] = recon[p];
-              rgba[outIdx + 1] = recon[p];
-              rgba[outIdx + 2] = recon[p];
-              rgba[outIdx + 3] = 255;
-            } else if (colorType === 3 && palette) {
-              const idx = recon[p];
-              rgba[outIdx] = palette[idx * 3] ?? 0;
-              rgba[outIdx + 1] = palette[idx * 3 + 1] ?? 0;
-              rgba[outIdx + 2] = palette[idx * 3 + 2] ?? 0;
-              rgba[outIdx + 3] = trns && idx < trns.length ? trns[idx] : 255;
-            }
-          }
+      let val = rawByte;
+      if (filterType === 1) val = (rawByte + a) & 0xff;
+      else if (filterType === 2) val = (rawByte + b) & 0xff;
+      else if (filterType === 3) val = (rawByte + ((a + b) >> 1)) & 0xff;
+      else if (filterType === 4) val = (rawByte + paethPredictor(a, b, c)) & 0xff;
 
-          return { width, height, pixels: rgba, mimeType: 'image/png' };
-        }
-      } catch {
-        // Fall through to deterministic rasterizer if non-standard PNG compression
-      }
+      recon[rowOut + i] = val;
     }
   }
 
-  // Deterministic rasterization from raw payload bytes for JPEG/WebP/interlaced inputs
-  const digest = crypto.createHash('sha256').update(buffer).digest();
-  const width = 96;
-  const height = 96;
-  const prodColor: [number, number, number] = [
-    40 + (digest[0] % 180),
-    35 + (digest[1] % 180),
-    45 + (digest[2] % 180),
-  ];
-  const labelColor: [number, number, number] = [
-    180 + (digest[3] % 70),
-    160 + (digest[4] % 80),
-    80 + (digest[5] % 140),
-  ];
-  const generated = createSampleProductRgba({
-    width,
-    height,
-    backgroundColor: [248, 248, 250],
-    productColor: prodColor,
-    labelColor,
-  });
+  const rgba = new Uint8Array(width * height * 4);
+  for (let p = 0; p < width * height; p++) {
+    const outIdx = p * 4;
+    if (colorType === 6) {
+      rgba[outIdx] = recon[p * 4];
+      rgba[outIdx + 1] = recon[p * 4 + 1];
+      rgba[outIdx + 2] = recon[p * 4 + 2];
+      rgba[outIdx + 3] = recon[p * 4 + 3];
+    } else if (colorType === 2) {
+      rgba[outIdx] = recon[p * 3];
+      rgba[outIdx + 1] = recon[p * 3 + 1];
+      rgba[outIdx + 2] = recon[p * 3 + 2];
+      rgba[outIdx + 3] = 255;
+    } else if (colorType === 4) {
+      rgba[outIdx] = recon[p * 2];
+      rgba[outIdx + 1] = recon[p * 2];
+      rgba[outIdx + 2] = recon[p * 2];
+      rgba[outIdx + 3] = recon[p * 2 + 1];
+    } else if (colorType === 0) {
+      rgba[outIdx] = recon[p];
+      rgba[outIdx + 1] = recon[p];
+      rgba[outIdx + 2] = recon[p];
+      rgba[outIdx + 3] = 255;
+    } else if (colorType === 3 && palette) {
+      const idx = recon[p];
+      rgba[outIdx] = palette[idx * 3] ?? 0;
+      rgba[outIdx + 1] = palette[idx * 3 + 1] ?? 0;
+      rgba[outIdx + 2] = palette[idx * 3 + 2] ?? 0;
+      rgba[outIdx + 3] = trns && idx < trns.length ? trns[idx] : 255;
+    }
+  }
 
-  return { width, height, pixels: generated, mimeType };
+  return { width, height, pixels: rgba, mimeType: 'image/png' };
 }
 
 /**
- * Helper to create a clean synthetic product photo (e.g. bottle/jar with cap and brand label)
+ * Helper to create a clean product photo fixture (bottle/jar with cap and brand label)
  * as raw RGBA pixels or PNG Data URL for testing and studio verification.
  */
 export function createSampleProductRgba(options: {
@@ -369,13 +440,11 @@ export function createSampleProductRgba(options: {
         rgba[idx + 2] = label[2];
         rgba[idx + 3] = 255;
       } else if (inNeck) {
-        // Metallic cap / neck
         rgba[idx] = Math.min(255, label[0] + 15);
         rgba[idx + 1] = Math.min(255, label[1] + 10);
         rgba[idx + 2] = Math.max(0, label[2] - 20);
         rgba[idx + 3] = 255;
       } else if (inBody) {
-        // Subtle cylindrical specular highlight on bottle body
         const relX = (x - bodyLeft) / Math.max(1, bodyRight - bodyLeft);
         const specular = relX > 0.18 && relX < 0.28 ? 28 : 0;
         rgba[idx] = Math.min(255, prod[0] + specular);
@@ -409,14 +478,17 @@ export function createSampleProductPngDataUrl(options: {
 
 /**
  * Stage 1 & 2 of Product Fidelity Pipeline:
- * Estimates border background color, isolates foreground product pixels via Euclidean
- * color/alpha matting, extracts binary/soft mask PNG, and computes product bounding box.
+ * Decodes PNG, JPEG, or WebP product image via Sharp, estimates border background color,
+ * isolates foreground product pixels via Euclidean color/alpha matting, extracts binary
+ * mask PNG, and computes product bounding box.
  */
-export function isolateProductForeground(imageInput: string): IsolatedProductResult {
-  const decoded = decodePngDataUrl(imageInput);
+export async function isolateProductForeground(
+  imageInput: string
+): Promise<IsolatedProductResult> {
+  const decoded = await decodeProductImage(imageInput);
   const { width, height, pixels } = decoded;
 
-  // Sample border corners to estimate background color
+  // Sample border corners and midpoints to estimate background color
   const sampleCoords = [
     [0, 0],
     [width - 1, 0],
@@ -612,9 +684,9 @@ function getPresetPalette(presetId: string): {
 
 /**
  * Stage 3 & 4 of Product Fidelity Pipeline:
- * Renders the studio scene (or takes a generated studio backdrop), synthesizes the
- * horizon surface, pedestal, and elliptical contact shadow, and composites the
- * customer's exact isolated foreground product pixels onto the studio canvas.
+ * Renders the studio scene, synthesizes the horizon surface, pedestal, and elliptical
+ * contact shadow, and composites the customer's exact isolated foreground product pixels
+ * onto the studio canvas.
  */
 export function compositeProductOnStudioScene(options: {
   isolated: IsolatedProductResult;
@@ -656,7 +728,6 @@ export function compositeProductOnStudioScene(options: {
         );
         canvas[idx + 3] = 255;
       } else {
-        // Studio surface / pedestal plane
         const surfaceT = (y - horizonY) / Math.max(1, canvasHeight - horizonY);
         const shade = 1 - surfaceT * 0.18;
         canvas[idx] = Math.round(palette.pedestalColor[0] * shade);

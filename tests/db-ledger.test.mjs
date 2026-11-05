@@ -54,7 +54,7 @@ describe('Database Persistence & Atomic CreditLedgerService (Integration)', () =
       category: 'perfume',
       stylePreset: 'ramadan-luxury',
       aspectRatio: '1:1',
-      modelUsed: 'gemini-nano-banana-2.1',
+      modelUsed: 'gemini-3.1-flash-image',
       rawPrompt: 'Luxury gold oud bottle',
       synthesizedPrompt: 'Commercial product photo of Luxury gold oud bottle',
       creditCost: 2,
@@ -101,7 +101,7 @@ describe('Database Persistence & Atomic CreditLedgerService (Integration)', () =
       category: 'accessories',
       stylePreset: 'minimal-studio',
       aspectRatio: '1:1',
-      modelUsed: 'gemini-nano-banana-2.1',
+      modelUsed: 'gemini-3.1-flash-image',
       rawPrompt: 'Watch',
       synthesizedPrompt: 'Watch studio',
       creditCost: 1,
@@ -141,7 +141,7 @@ describe('Database Persistence & Atomic CreditLedgerService (Integration)', () =
           category: 'skincare',
           stylePreset: 'minimal-studio',
           aspectRatio: '1:1',
-          modelUsed: 'gemini-nano-banana-2.1',
+          modelUsed: 'gemini-3.1-flash-image',
           rawPrompt: `Item ${i}`,
           synthesizedPrompt: `Studio Item ${i}`,
           creditCost: 1,
@@ -203,3 +203,4 @@ describe('Database Persistence & Atomic CreditLedgerService (Integration)', () =
     assert.equal(balance.settledBalance, 85); // 5 trial + 80 starter (granted once)
   });
 });
+

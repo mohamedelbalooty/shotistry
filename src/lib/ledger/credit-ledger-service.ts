@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import type { PrismaClient } from '@prisma/client';
 import { getDb, withSerializableTransaction } from '../db/prisma.ts';
+import { PostgresCreditLedgerService } from './postgres-ledger-service.ts';
 
 export interface WorkspaceProvisionInput {
   userId?: string;
@@ -46,6 +48,18 @@ export interface CreatePhotoshootJobInput {
 }
 
 export class CreditLedgerService {
+  private readonly pgDelegate?: PostgresCreditLedgerService;
+
+  constructor(prismaClient?: PrismaClient) {
+    if (
+      prismaClient ||
+      (process.env.SHOTISTRY_DB_DRIVER === 'postgres' &&
+        process.env.DATABASE_URL?.startsWith('postgres'))
+    ) {
+      this.pgDelegate = new PostgresCreditLedgerService(prismaClient);
+    }
+  }
+
   private computeBalancesSync(db: DatabaseSync, workspaceId: string) {
     const ledgerRow = db
       .prepare(
@@ -77,6 +91,9 @@ export class CreditLedgerService {
   public async ensureWorkspace(
     input: WorkspaceProvisionInput = {}
   ): Promise<WorkspaceBalanceSummary> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.ensureWorkspace(input);
+    }
     const userId = input.userId ?? 'user-default-merchant';
     const email = input.email ?? `${userId}@merchant.shotistry.app`;
     const userName = input.userName ?? 'Shotistry Merchant';
@@ -161,6 +178,9 @@ export class CreditLedgerService {
   }
 
   public async getWorkspaceBalance(workspaceId: string): Promise<WorkspaceBalanceSummary> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.getWorkspaceBalance(workspaceId);
+    }
     const db = getDb();
     const ws = db
       .prepare(`SELECT "id", "ownerId", "country", "currency" FROM "Workspace" WHERE "id" = ?`)
@@ -205,6 +225,9 @@ export class CreditLedgerService {
     assetId?: string;
     status: string;
   }> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.createPhotoshootJob(input);
+    }
     return withSerializableTransaction((db) => {
       const now = new Date().toISOString();
       const brandId = `brand-${input.workspaceId}`;
@@ -305,6 +328,9 @@ export class CreditLedgerService {
     status: 'PENDING' | 'SETTLED' | 'RELEASED';
     createdAt: string;
   }> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.reserveCredits(params);
+    }
     if (params.amount <= 0) {
       throw new Error('Reservation amount must be strictly positive');
     }
@@ -380,6 +406,9 @@ export class CreditLedgerService {
       idempotencyKey: string;
     };
   }> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.settleReservation(reservationId);
+    }
     return withSerializableTransaction((db) => {
       const res = db
         .prepare(
@@ -498,6 +527,9 @@ export class CreditLedgerService {
     status: 'RELEASED';
     settledAt: string;
   }> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.releaseReservation(reservationId, reason);
+    }
     return withSerializableTransaction((db) => {
       const res = db
         .prepare(
@@ -566,6 +598,9 @@ export class CreditLedgerService {
     createdAt: string;
     duplicate: boolean;
   }> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.grantCredits(params);
+    }
     if (params.amount === 0) {
       throw new Error('Credit adjustment amount cannot be zero');
     }
@@ -636,3 +671,4 @@ export class CreditLedgerService {
     });
   }
 }
+

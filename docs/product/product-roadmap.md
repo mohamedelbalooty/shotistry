@@ -7,7 +7,7 @@
 │ MVP RELEASE (Current Focus - Foundation & Monetization)                     │
 │ • Full Studio & Photoshoot Experience                                       │
 │ • Regional Presets (Gulf Luxury, Ramadan, Minimalist, Botanical)            │
-│ • Google Gemini & Imagen 3 Inpainting Pipeline with Product Fidelity         │
+│ • Google Gemini Interactions API (`gemini-3.1-flash-image`) Product Pipeline  │
 │ • Paymob Recurring Subscriptions & Credit Top-Up Packs (EGP & SAR)          │
 │ • Double-Entry Credit Ledger with Atomic Concurrency Locks                 │
 │ • Bilingual English & Arabic UI with native RTL typography                  │

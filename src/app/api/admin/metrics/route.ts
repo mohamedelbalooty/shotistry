@@ -104,7 +104,7 @@ export async function GET(request: Request) {
       id: String(row.id),
       product: String(row.product || 'Commercial Product'),
       preset: String(row.preset || 'gulf_luxury_marble'),
-      model: String(row.modelUsed || 'gemini-nano-banana-2.1'),
+      model: String(row.modelUsed || 'gemini-3.1-flash-image'),
       status: isCompleted ? 'SUCCESS' : String(row.status),
       cost: isCompleted ? '$0.0336' : '$0.0000 (Refunded)',
       user: String(row.userEmail || 'merchant@shotistry.app'),

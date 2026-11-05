@@ -87,6 +87,13 @@ export default function StudioPage() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+      if (file.type && !allowedTypes.includes(file.type.toLowerCase())) {
+        setErrorMessage(
+          'صيغة الملف غير مدعومة. يرجى رفع صورة منتج بصيغة PNG أو JPEG أو WebP فقط.'
+        );
+        return;
+      }
       if (file.size > 20 * 1024 * 1024) {
         setErrorMessage('حجم الصورة يتجاوز الحد الأقصى (20 ميجابايت)');
         return;

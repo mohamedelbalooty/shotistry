@@ -148,6 +148,8 @@ export async function POST(request: Request) {
       await ledger.releaseReservation(reservation.id, errMsg);
       const isValidationError =
         errMsg.toLowerCase().includes('invalid') ||
+        errMsg.toLowerCase().includes('unsupported') ||
+        errMsg.toLowerCase().includes('corrupt') ||
         errMsg.toLowerCase().includes('product image') ||
         errMsg.toLowerCase().includes('buffer');
 

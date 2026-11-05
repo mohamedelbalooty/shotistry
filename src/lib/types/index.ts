@@ -33,11 +33,22 @@ export type LedgerTransactionType =
 export type AspectRatio = '1:1' | '4:5' | '9:16' | '16:9';
 
 export type GeminiImageModelId =
-  | 'gemini-nano-banana-2.1'
-  | 'gemini-3-pro-image'
-  | 'gemini-3.1-flash-lite-image';
+  | 'gemini-3.1-flash-image'
+  | 'gemini-3.1-flash-lite-image'
+  | 'gemini-3-pro-image';
+
+export type GeminiImageSize = '512' | '1K' | '2K' | '4K';
+
+export type SupportedImageMimeType = 'image/png' | 'image/jpeg' | 'image/webp';
 
 export type ExecutionMode = 'LIVE_GEMINI_API' | 'LOCAL_COMPOSITE_SANDBOX';
+
+export interface GeminiUsageMetadata {
+  inputTokens: number;
+  outputTokens: number;
+  thoughtTokens?: number;
+  totalTokens: number;
+}
 
 export interface PlanConfig {
   tier: PlanTier;
@@ -103,6 +114,7 @@ export interface GenerationRequest {
 export interface GenerationResult {
   jobId: string;
   photoshootId?: string;
+  interactionId?: string;
   status?: 'COMPLETED' | 'FAILED';
   imageUrl: string;
   thumbnailUrl: string;
@@ -110,13 +122,14 @@ export interface GenerationResult {
   isolatedProductUrl?: string;
   aspectRatio: AspectRatio;
   resolution: string;
-  modelUsed: string;
+  modelUsed: GeminiImageModelId | string;
   executionMode: ExecutionMode;
   synthesizedPrompt: string;
   negativePrompt?: string;
   synthIdDetected: boolean;
   fidelityScore: number;
   fidelityVerified: boolean;
+  usageMetadata?: GeminiUsageMetadata;
   creditsCharged?: number;
   remainingCredits?: number;
   completedAt: string;

@@ -25,7 +25,7 @@
 ┌─────────────────────────┐ ┌─────────────────────┐ ┌─────────────────────────┐
 │     PERSISTENCE LAYER   │ │   AI INFERENCE      │ │     OBJECT STORAGE      │
 │ Managed PostgreSQL      │ │ Google GenAI API    │ │ Cloudflare R2 / S3      │
-│ (Neon / Supabase)       │ │ • Imagen 3          │ │ • Raw product uploads   │
+│ (Neon / Supabase)       │ │ • gemini-3.1-flash  │ │ • Raw product uploads   │
 │ Prisma ORM              │ │ • Gemini 2.5 Flash  │ │ • Segmented alpha masks │
 │ Strict ACID & Locks     │ │ • SynthID Watermark │ │ • Generated 4K renders  │
 └─────────────────────────┘ └─────────────────────┘ └─────────────────────────┘

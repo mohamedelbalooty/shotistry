@@ -7,7 +7,7 @@ All calculations use official, verified API pricing and current regional exchang
 
 | Cost Component | Pricing Specification | Cost per Image (USD) | Cost in EGP | Cost in SAR |
 |---|---|---|---|---|
-| **Google Imagen 3 / Gemini Image API** | ~$0.030 per generated 1K image (standard endpoint) | $0.03000 | 1.4700 EGP | 0.11250 SAR |
+| **Google Gemini Interactions API (`gemini-3.1-flash-image`)** | ~$0.0336 per generated 1K image (1,120 output tokens) | $0.03360 | 1.6800 EGP | 0.12600 SAR |
 | **Multimodal Prompt Reasoning & Inpainting** | Gemini 2.5 Flash input/output tokens | $0.00100 | 0.0490 EGP | 0.00375 SAR |
 | **Cloudflare R2 Storage & CDN Delivery** | $0.015/GB/mo storage; $0 egress fee | $0.00050 | 0.0245 EGP | 0.00188 SAR |
 | **Failed Generation & Retry Reserve** | Estimated 3% failure/retry rate absorbed by platform | $0.00100 | 0.0490 EGP | 0.00375 SAR |

@@ -1,44 +1,54 @@
-# Google Gemini & Nano Banana Model Research (Verified November 2026)
+# Google Gemini Interactions API Image Model Research (Verified November 2026)
 
-## 1. Official Google Image Generation & Deprecation Status
+## 1. Official Google Image Generation Model Identifiers & Deprecation Status
 
-Per official Google AI Studio documentation (`ai.google.dev/gemini-api/docs/deprecations`, `docs/models`, `docs/image-generation`, `docs/pricing`) as of November 2026:
-- **`imagen-3.0-generate-002`**: **SHUT DOWN** on November 10, 2025.
-- **`imagen-4.0-generate-001` / `imagen-4.0-ultra-generate-001` / `imagen-4.0-fast-generate-001`**: **SHUT DOWN** on August 17, 2026. (*"Imagen is shut down and no longer available through the Gemini API. Use Nano Banana for image generation and editing."*)
-- **`gemini-2.5-flash`**: **DEPRECATED** (auto-routes to `gemini-3.5-flash-lite` on Dec 1, 2026; shuts down March 15, 2027). Replaced by **`gemini-3.8-flash`** and **`gemini-3.5-flash-lite`**.
-- **`gemini-2.5-flash-image` (Nano Banana 1)**: **DEPRECATED** (shuts down March 15, 2027). Replaced by **`gemini-nano-banana-2.1`** and **`gemini-3.1-flash-lite-image`**.
+Per official Google AI Studio documentation (`aistudio.google.com/docs/models/gemini-3.1-flash-image`, `docs/models/gemini-3.1-flash-lite-image`, `docs/models/gemini-3-pro-image`, `docs/image-generation`, `docs/deprecations`) as of November 2026:
+- **Official API Model Identifiers (Must be used in API requests, NOT marketing names):**
+  - **`gemini-3.1-flash-image`** *(marketed as Nano Banana 2)* — **ACTIVE (Default)**: High-efficiency commercial image generation & multimodal reference editing supporting `512` (0.5K), `1K` (default), `2K`, and `4K` resolutions, up to 14 reference images (10 objects with high fidelity), and 14 aspect ratios.
+  - **`gemini-3.1-flash-lite-image`** *(marketed as Nano Banana 2 Lite)* — **ACTIVE (Fast 1K Preview)**: Sub-2 second low-latency 1K (`1024px`) image generation and editing (`2K` and `4K` are unsupported on Lite and automatically clamped to `1K`).
+  - **`gemini-3-pro-image`** *(marketed as Nano Banana Pro)* — **ACTIVE (4K Studio Pro)**: Reasoning-driven studio-grade 1K/2K/4K image generation for complex commercial mockups and bilingual typography.
+- **Disallowed / Retired / Marketing Aliases (Normalized by `normalizeGeminiImageModel()` and never sent in API requests):**
+  - `gemini-nano-banana-2.1`: Product marketing alias — normalized to **`gemini-3.1-flash-image`**.
+  - `imagen-3.0-generate-002`: **SHUT DOWN** on November 10, 2025.
+  - `imagen-4.0-generate-001` / `imagen-4.0-ultra-generate-001` / `imagen-4.0-fast-generate-001`: **SHUT DOWN** on August 17, 2026.
+  - `gemini-2.5-flash-image`: **DEPRECATED** (shuts down March 15, 2027) — normalized to **`gemini-3.1-flash-image`**.
 
-All current image generation and multimodal reference-image conditioning in `@google/genai` use the **Interactions API (`ai.interactions.create`)**:
+All image generation and multimodal reference-image conditioning in `@google/genai` use the **Interactions API (`ai.interactions.create`)**:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│               GOOGLE GEMINI NANO BANANA INTERACTIONS PIPELINE               │
-├──────────────────────────────────────┬──────────────────────────────────────┤
-│ 1. DEFAULT COMMERCIAL STUDIO ENGINE  │ 2. ULTRA 4K / HIGH-VOLUME ENGINES    │
-│ Model: gemini-nano-banana-2.1        │ Models: gemini-3-pro-image (4K Pro)  │
-│ Method: ai.interactions.create()     │         gemini-3.1-flash-lite-image  │
-│ • Up to 14 reference images          │ • Reasoning-guided 4K studio design  │
-│ • Up to 10 high-fidelity objects     │ • Arabic & English typography        │
-│ • Binary mask + foreground lock      │ • Ultra-fast 1K catalog previews     │
-│ • SynthID digital watermark          │ • Native aspect ratios (1:1..16:9)   │
-└──────────────────────────────────────┴──────────────────────────────────────┘
+```ts
+const interaction = await ai.interactions.create({
+  model: 'gemini-3.1-flash-image', // or 'gemini-3.1-flash-lite-image' | 'gemini-3-pro-image'
+  input: [
+    { type: 'text', text: promptText },
+    { type: 'image', mime_type: 'image/png', data: base64ProductImage },
+    { type: 'image', mime_type: 'image/png', data: base64MaskImage },
+  ],
+  response_format: {
+    type: 'image',
+    mime_type: 'image/png',
+    aspect_ratio: '1:1',
+    image_size: '1K', // Uppercase required ('512' | '1K' | '2K' | '4K')
+  },
+});
+
+const outputBase64 = interaction.output_image?.data;
 ```
 
 ---
 
 ## 2. Technical Evaluation of Active Official Models
 
-| Model Identifier | Official Status | Primary Capability | Reference & Mask Support | Cost / 1K Image |
-|---|---|---|---|---|
-| **`gemini-nano-banana-2.1`** | **ACTIVE (Default)** | Multimodal commercial studio rendering & reference editing | ✅ Up to 14 reference images (10 objects with high fidelity) + mask | **$0.0336 USD** ($30/1M image output tokens; $0.0504 for 2K; $0.113 for 4K) |
-| **`gemini-3.1-flash-lite-image`** | **ACTIVE (Fast 1K)** | High-volume catalog previews & fast iteration | ✅ Multimodal image + text input | **$0.0336 USD** ($0.0168 USD in Batch API) |
-| **`gemini-3-pro-image`** | **ACTIVE (4K Studio Pro)** | Studio-grade 4K reasoning design & complex typography | ✅ Up to 6 object references + 3 style references | Tiered 1K/2K/4K image output tokens |
-| **`gemini-3.8-flash`** | **ACTIVE (Reasoning)** | Multimodal vision analysis & prompt reasoning | Text/Vision input | $0.75 / 1M input, $3.75 / 1M output |
+| Official API Model Code | Marketing Name | Official Status | Supported `image_size` | Reference & Mask Support | Token Output (1K / 2K / 4K) |
+|---|---|---|---|---|---|
+| **`gemini-3.1-flash-image`** | Nano Banana 2 | **ACTIVE (Default)** | `512`, `1K`, `2K`, `4K` | ✅ Up to 14 reference images (10 objects with high fidelity) + mask | 1120 / 1680 / 2520 tokens |
+| **`gemini-3.1-flash-lite-image`** | Nano Banana 2 Lite | **ACTIVE (Fast 1K)** | `1K` only | ✅ Multimodal image + text input | 1120 tokens (1K) |
+| **`gemini-3-pro-image`** | Nano Banana Pro | **ACTIVE (4K Studio Pro)** | `1K`, `2K`, `4K` | ✅ Up to 14 reference images (5 high-fidelity objects) | 1120 / 1120 / 2000 tokens |
+| **`gemini-3.8-flash`** | Gemini 3.8 Flash | **ACTIVE (Reasoning)** | N/A (Text/Vision) | Multimodal vision analysis & prompt reasoning | $0.75 / 1M in, $3.75 / 1M out |
 
 ---
 
 ## 3. Product Photography Benchmarking & Fidelity Criteria
-1. **Foreground Pixel Lock (`src/lib/ai/image-processor.ts`):** Every uploaded customer product photo undergoes alpha matting / background segmentation to extract a binary foreground mask (`maskDataUrl`) and isolated product layer (`isolatedProductDataUrl`).
-2. **Physical Lighting Coherence:** Studio backdrops cast directional lighting, horizon reflections, and elliptical contact ambient occlusion shadows beneath the product base.
+1. **Multi-Format Pixel Decoding via Sharp (`src/lib/ai/image-processor.ts`):** Every uploaded customer product photo (`PNG`, `JPEG`, or `WebP`) is decoded into real 8-bit RGBA pixels using `sharp` (`libvips` + `mozjpeg` + `libwebp`) with automatic phone-camera EXIF orientation normalization (`.rotate()`) and zero synthetic hash fallbacks.
+2. **Foreground Pixel Lock:** Euclidean color/alpha matting extracts a binary foreground mask (`maskDataUrl`) and isolated product layer (`isolatedProductDataUrl`).
 3. **Verifiable Pixel Preservation (`fidelityScore`):** Foreground product pixels are quantitatively compared against the final composited output (`fidelityScore >= 0.90` required for `fidelityVerified: true`).
 4. **Truthful SynthID Provenance:** `synthIdDetected: true` is reported **only** when executed against the live Google Gemini API (`executionMode: 'LIVE_GEMINI_API'`), and is always `false` in local sandbox compositing mode (`executionMode: 'LOCAL_COMPOSITE_SANDBOX'`).
