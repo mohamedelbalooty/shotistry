@@ -23,3 +23,4 @@ Before deploying to production and declaring completion:
 - [x] Bilingual English & Arabic layout with native RTL typography.
 - [x] Responsive layout tested for mobile, tablet, and desktop viewports.
 - [x] Clear loading and error states with user-friendly Arabic copy.
+

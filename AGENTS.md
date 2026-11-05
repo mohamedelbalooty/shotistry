@@ -55,3 +55,4 @@ This project strictly enforces the **Superpowers** engineering methodology (Jess
 - All user-facing interfaces must support English (`en`) and Arabic (`ar`) natively with proper RTL typography and directional alignment (`Cairo` / `IBM Plex Sans Arabic` fonts).
 - Pricing must be dynamically formatted: Egyptian Pounds (`EGP`) for Egypt, Saudi Riyals (`SAR`) for Saudi Arabia.
 - Local payment nuances: Support Mada, Apple Pay, Visa, Mastercard, Meeza, and mobile wallets through Paymob.
+

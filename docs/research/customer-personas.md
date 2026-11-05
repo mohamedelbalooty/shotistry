@@ -56,3 +56,4 @@
   - High-resolution export (4K / 300 DPI) suitable for social ad placements and catalog printing.
   - Batch generation and team collaboration seats.
 - **Willingness to Pay:** 999 – 2,499 EGP / 399 – 899 SAR per month on agency tier.
+

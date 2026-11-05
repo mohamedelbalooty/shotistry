@@ -34,3 +34,4 @@ STORAGE_SECRET_ACCESS_KEY="your-r2-secret-access-key"
 STORAGE_BUCKET_NAME="shotistry-assets"
 NEXT_PUBLIC_CDN_URL="https://cdn.shotistry.com"
 ```
+

@@ -46,3 +46,4 @@
 3. **Stateless Scalability:**
    - Zero local server disk dependencies. All assets reside in S3/R2 object storage with signed URL access.
    - Application servers can scale from 0 to hundreds of instances seamlessly on Vercel.
+

@@ -42,3 +42,4 @@
 - **FR-18:** Executive KPI Dashboard: Total Users, Paying Subscribers, MRR in EGP/SAR/USD, AI API costs, and Gross Margin.
 - **FR-19:** Generation job inspector (investigating failed jobs, viewing prompts, tracking latency).
 - **FR-20:** Manual credit adjustment tool with mandatory audit reason logging.
+

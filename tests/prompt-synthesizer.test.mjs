@@ -71,3 +71,4 @@ describe('Commercial Prompt Synthesizer Tests', () => {
     assert.ok(result.fullPrompt.includes('Hero commercial studio photography of Sneakers'));
   });
 });
+

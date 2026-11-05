@@ -14,3 +14,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Complete REST API specifications and Architecture Decision Records (ADR-001, ADR-002, ADR-003).
   - Superpowers methodology integration in `AGENTS.md`.
   - Comprehensive quality assurance, security, data privacy (KSA PDPL & Egypt Law No. 151), and deployment guides.
+

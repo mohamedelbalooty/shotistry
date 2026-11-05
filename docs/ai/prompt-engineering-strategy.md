@@ -30,3 +30,4 @@ Every prompt synthesized by Shotistry follows a strict 10-component structural s
 8. **Color Grading:** Color temperature and mood (e.g., "warm golden hour tones, rich earthy contrast, muted neutral highlights").
 9. **Physical Coherence:** Contact grounding (e.g., "ground contact shadow, true-to-life ambient occlusion, no floating artifacts").
 10. **Negative Directives:** Prevent common failure modes (e.g., "no warped geometry, no low resolution artifacts, no floating props, no fake text on product").
+

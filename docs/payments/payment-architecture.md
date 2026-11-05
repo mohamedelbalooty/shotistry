@@ -41,3 +41,4 @@
 - **Rule 1 (Zero Client Trust):** Under no circumstances is a subscription activated or are credits granted based on front-end browser redirection parameters (e.g., `?success=true`).
 - **Rule 2 (Server Webhook Authority):** Only cryptographically verified, server-to-server Paymob webhook events can mutate subscription state or execute credit ledger transactions.
 - **Rule 3 (Idempotency):** Every incoming webhook payload is checked against the `WebhookEvent` table by its unique event ID (`paymob_request_id` or `id`). If already processed, the endpoint returns an immediate HTTP 200 without re-crediting the user.
+

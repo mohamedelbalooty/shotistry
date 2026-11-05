@@ -335,3 +335,4 @@ model AdminAuditLog {
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 ```
+

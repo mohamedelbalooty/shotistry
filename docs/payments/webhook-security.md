@@ -91,3 +91,4 @@ For standard transaction webhooks, Paymob requires concatenating 20 specific tra
 ## 4. Idempotency & Replay Attack Defense
 1. **Timestamp Check:** Webhook timestamps older than 5 minutes are flagged for audit review.
 2. **Database Deduplication:** Each incoming event is written to `WebhookEvent` with `payload_hash` and `event_id` unique constraints inside a serializable transaction. Duplicate events are silently acknowledged with HTTP 200 without reprocessing.
+

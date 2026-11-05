@@ -24,3 +24,4 @@ Image generation via Google GenAI (`imagen-3.0-generate-002`) typically requires
 ## 3. Consequences
 - **Positive:** Zero client request timeouts; resilient retry capability; real-time progress feedback (e.g. "Segmenting...", "Synthesizing lighting...", "Rendering 4K details...").
 - **Negative:** Client requires state management to track active job status across browser reloads (handled cleanly in workspace store).
+

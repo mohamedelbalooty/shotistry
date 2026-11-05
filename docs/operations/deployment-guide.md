@@ -25,3 +25,4 @@
      - Set Transaction Webhook URL to: `https://app.shotistry.com/api/webhooks/paymob`
      - Set Subscription Webhook URL to: `https://app.shotistry.com/api/webhooks/paymob`
      - Copy HMAC Secret to Vercel `PAYMOB_HMAC_SECRET`.
+

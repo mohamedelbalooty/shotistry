@@ -42,3 +42,4 @@ We reject the one-size-fits-all USD pricing model of Western competitors ($19–
 - **Downgrades:** Takes effect at the end of the current 30-day billing period.
 - **Cancellations:** 1-click self-serve cancellation from the billing dashboard. The user retains their remaining credits and access until the end of their current paid 30-day cycle.
 - **Refund Policy:** Guaranteed 7-day refund if fewer than 10 credits have been consumed. Once a substantial volume of generations is processed, refunds are not issued to prevent API cost abuse.
+

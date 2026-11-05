@@ -100,3 +100,4 @@ All calculations use official, verified API pricing and current regional exchang
   - Total Cost: $63.38 + 10.98 = 74.36\text{ SAR}$
   - Gross Profit: $399.00 - 74.36 = 324.64\text{ SAR}$
   - **Expected Gross Margin: 81.4%** ✅
+

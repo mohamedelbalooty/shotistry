@@ -53,3 +53,4 @@ Total Combined Monthly Recurring Revenue (MRR):
   - On the Egyptian Pro Plan (899 EGP, 130 expected images): COGS becomes $(130 \times 2.00) + 27.72 = 287.72\text{ EGP}$.
   - Egyptian Pro Plan Gross Margin shifts from 73.9% to **68.0%**.
   - Because Saudi Arabia represents ~73% of overall USD revenue, the blended portfolio gross margin drops by only 1.9% (from 76.6% to 74.7%), proving extraordinary portfolio resilience.
+

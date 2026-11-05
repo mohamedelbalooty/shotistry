@@ -43,3 +43,4 @@ Shotistry operates as a hybrid **B2B SaaS subscription and usage-based platform*
    - Referral program: Existing merchants earn 25 bonus credits for every paying store referred.
 3. **Agency Partner Program:**
    - Agencies receive volume tiering, multiple brand workspaces, team access, and a 15% revenue share on client subscriptions they manage.
+

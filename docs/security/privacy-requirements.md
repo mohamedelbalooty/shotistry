@@ -19,3 +19,4 @@ Under Google's official paid commercial API terms:
 - Data sent to the Gemini API (prompts, uploaded product reference images) via paid developer projects **is NOT used by Google to train or fine-tune models**.
 - Customer data is strictly encrypted in transit (TLS 1.3) and at rest (AES-256).
 - All generated images embed Google's invisible **SynthID digital watermark** for provenance verification.
+

@@ -44,3 +44,4 @@ Shotistry ships with an extensive catalog of pre-engineered, category-specific p
 - **Visual Mood:** Festive, celebratory, spiritual warmth.
 - **Base Prompt Template:**
   > "Festive commercial advertising photoshoot celebrating Ramadan and Eid. The product is elegantly arranged on a rich carved dark walnut wood table with subtle mother-of-pearl inlays. In the soft bokeh background, an ornate traditional brass lantern (Fanous) casts intricate warm geometric light patterns onto a warm textured wall. Delicate crescent moon and star decorative motifs, fresh gourmet dates in a silver dish softly blurred in the periphery. Warm, cozy candlelit color palette, cinematic ambient lighting."
+

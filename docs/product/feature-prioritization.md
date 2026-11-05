@@ -21,3 +21,4 @@ $$\text{RICE Score} = \frac{\text{Reach} \times \text{Impact} \times \text{Confi
 | **Salla & Zid Direct Store Sync Plugins** | 7 | 2.5 | 80% | 4 | **3.50** | **P1 (V1.1 Release)** |
 | **AI Human Models for Fashion Apparel** | 6 | 3.0 | 70% | 5 | **2.52** | **P2 (V2.0 Release)** |
 | **Video Reel Generation for Products** | 7 | 3.0 | 60% | 6 | **2.10** | **P2 (V2.0 Release)** |
+

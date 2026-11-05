@@ -60,3 +60,4 @@ Standard text-to-image AI models hallucinate new details by default. To overcome
 1. Original brand logos, typography, certifications, and barcode labels are preserved with 100% pixel fidelity.
 2. Original product color tones are preserved against an unskewed sRGB color profile.
 3. If an uploaded product image is too blurry, cropped, or poorly lit to preserve fidelity, the system proactively alerts the user during upload rather than silently producing a defective output.
+

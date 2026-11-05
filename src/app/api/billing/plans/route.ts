@@ -13,3 +13,4 @@ export async function GET(request: Request) {
     topUpPacks: TOP_UP_PACKS,
   });
 }
+

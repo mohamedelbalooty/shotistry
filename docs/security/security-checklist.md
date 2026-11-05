@@ -9,3 +9,4 @@
 - [x] **Rate Limiting:** IP-based and user-based token bucket rate limits on authentication and generation endpoints.
 - [x] **Secure Upload Gateways:** File uploads restricted to valid image MIME types (`image/jpeg`, `image/png`, `image/webp`) and max 20MB.
 - [x] **Role-Based Authorization:** Admin routes protected with session checks and strict `ADMIN` role verification.
+

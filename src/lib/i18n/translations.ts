@@ -124,3 +124,4 @@ export const TRANSLATIONS = {
     successRate: 'Generation Success Rate'
   }
 };
+

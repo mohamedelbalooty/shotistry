@@ -10,3 +10,4 @@ We performed a formal STRIDE threat assessment on the Shotistry platform:
 | **Information Disclosure** | Competitor discovers other merchants' unreleased products by guessing sequential asset URLs | Critical | Cryptographically secure UUIDv4 asset identifiers and time-limited presigned private URLs (5-minute TTL). |
 | **Denial of Service** | Malicious bot floods generation API with massive uncompressed image uploads | High | Client and server-side file type and size limits (max 20MB); rate limiting (10 requests/minute per IP/user); credit reservation gating. |
 | **Elevation of Privilege** | Normal user accesses internal admin metrics or overrides subscription state | Critical | Role-Based Access Control (RBAC) enforced on middleware and server actions (`ADMIN` role required). |
+

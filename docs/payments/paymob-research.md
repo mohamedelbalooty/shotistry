@@ -28,3 +28,4 @@ Paymob (`paymob.com`) is the leading payment infrastructure provider across Egyp
   - `amount_cents`: e.g., `89900` (899.00 EGP)
   - `frequency`: `30`
   - `webhook_url`: Dedicated server-side HTTPS callback endpoint.
+

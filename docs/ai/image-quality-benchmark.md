@@ -40,3 +40,4 @@ To ensure generated images meet strict commercial standards, every candidate gen
   - **Remedy:** Automatically inject strict contact ambient occlusion and ground-plane physics terms into the prompt synthesis stage.
 - **Issue:** Lighting on background contradicts highlights on original product.
   - **Remedy:** Gemini Flash pre-analyzes the product's dominant light direction (e.g. "key light from top-left") and forces the synthesized background lighting prompt to align symmetrically.
+

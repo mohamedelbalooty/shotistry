@@ -47,3 +47,4 @@ Our market and competitor benchmarking identified four massive untapped opportun
 | **Regional Methods** | Credit cards only | App Store billing | Mada, Apple Pay, Meeza, Wallets |
 | **Aesthetic Cues** | Western domestic backdrops | Generic studio cutouts | Gulf Luxury, Levantine, Egyptian, Heritage |
 | **Product Protection** | Inconsistent on small items | Cutout only | Dual-layer Mask Inpainting & Multimodal Gemini |
+

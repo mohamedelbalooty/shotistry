@@ -37,3 +37,4 @@ describe('Google Gemini & Imagen Client Tests', () => {
     assert.ok(result.imageUrl);
   });
 });
+

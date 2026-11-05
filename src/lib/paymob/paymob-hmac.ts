@@ -140,3 +140,4 @@ export class PaymobSecurity {
     return amountCents / 100;
   }
 }
+

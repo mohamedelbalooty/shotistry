@@ -118,3 +118,4 @@ describe('Double-Entry Credit Ledger Engine Tests', () => {
     assert.strictEqual(grantEntry.type, 'SUBSCRIPTION_GRANT');
   });
 });
+

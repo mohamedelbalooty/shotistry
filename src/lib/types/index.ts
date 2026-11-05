@@ -101,3 +101,4 @@ export interface GenerationResult {
   synthIdDetected: boolean;
   completedAt: string;
 }
+

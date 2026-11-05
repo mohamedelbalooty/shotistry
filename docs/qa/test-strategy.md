@@ -44,3 +44,4 @@
 
 ### C. End-to-End User Journey Tests
 - Automated test script simulating user registration, onboarding, product creation, photoshoot generation, and credit depletion.
+

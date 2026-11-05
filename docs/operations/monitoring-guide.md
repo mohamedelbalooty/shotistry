@@ -23,3 +23,4 @@ The production system monitors 4 critical operational health signals:
 - Customer-facing error messages are sanitized and translated into user-friendly Arabic and English:
   - Never expose raw stack traces or internal API keys.
   - Informative guidance provided (e.g. "الصورة المرفوعة منخفضة الدقة، يرجى رفع صورة أوضح للمنتج" / "The uploaded photo resolution is too low; please upload a clearer image of your product").
+

@@ -41,3 +41,4 @@ Shotistry requires an enterprise-ready, high-performance web architecture suppor
 ## 4. Consequences
 - **Positive:** Maximum operational simplicity; Next.js 15 handles frontend, API route handlers, and server actions within one unified repository; Cloudflare R2 preserves 75%+ gross margins.
 - **Negative:** Serverless execution time bounds require asynchronous job handling for AI tasks (addressed in ADR-003).
+

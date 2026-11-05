@@ -35,3 +35,4 @@ As of late 2024 through 2026, Google provides image generation and visual editin
 2. **Material Realism:** Are marble veins, polished glass, velvet, liquid transparency, and brushed metal accurately rendered?
 3. **Typography & Label Integrity:** Does the model avoid hallucinating scrambled letters or fake brand names on the product itself?
 4. **Resolution & Aspect Ratios:** Native support for 1:1 (Square), 4:5 (Instagram Feed), 9:16 (Stories/TikTok), and 16:9 (Landscape) without aspect distortion.
+

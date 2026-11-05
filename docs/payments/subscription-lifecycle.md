@@ -56,3 +56,4 @@
 2. **Day 2:** Paymob automated retry #1. If successful, state restored to `ACTIVE`.
 3. **Day 4:** Paymob automated retry #2. If failed, status transitions to `SUSPENDED` and generative actions are disabled.
 4. **Day 14:** Final notice. If no payment received, subscription marked `CANCELED`.
+

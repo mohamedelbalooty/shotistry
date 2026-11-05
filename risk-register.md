@@ -10,3 +10,4 @@
 | **RSK-006** | Compliance | KSA PDPL & Egyptian Data Protection Law requirements regarding customer image storage | Medium | Medium | Clear terms of service, strict tenant data isolation, customer data export/deletion workflows, and transparent AI processing disclosures. | Compliance Lead | Documented |
 | **RSK-007** | Operational | Paymob regional differences (Egypt Meeza/Wallets vs Saudi Mada/Apple Pay) | Medium | Medium | Unified checkout abstraction layer dynamically presenting available payment channels based on selected merchant market (`EG` vs `SA`). | Payment Engineer | Integrated in Architecture |
 | **RSK-008** | AI / Quality | Inadequate user prompt inputs leading to poor aesthetic generation | High | Medium | Curated photoshoot preset catalog and automated prompt synthesizer that transforms basic product tags into high-end commercial photo directives. | Prompt Engineer | Solved by Prompt Engine |
+

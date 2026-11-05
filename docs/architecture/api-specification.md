@@ -83,3 +83,4 @@
 - **Request Body:** Paymob JSON payload (`trigger_type`, `subscription_data`, etc.).
 - **Response:** `200 OK`
 - **Behavior:** Verifies cryptographic signature, deduplicates event in `WebhookEvent`, updates `Subscription` status, credits `CreditLedger` inside atomic transaction.
+

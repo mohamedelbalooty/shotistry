@@ -37,3 +37,4 @@ Total Internal Cost / Generation:    $0.03165 USD (~1.55 EGP / ~0.119 SAR)
 To ensure business logic never requires code redeployments when Google updates pricing:
 - A centralized database table (`ModelPricingConfig`) stores active model identifiers, resolution multipliers, token costs, and per-image base tariffs.
 - All credit burn calculations and admin margin analytics dynamically query this configuration.
+

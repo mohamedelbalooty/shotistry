@@ -10,3 +10,4 @@
 | **SRC-006** | Competitor | Flair AI Pricing Page | `https://flair.ai/pricing` | Flair AI Pro costs $10/mo, Pro+ $35/mo (~80 images); canvas node-based interface with high credit consumption per upscale. | November 2026 |
 | **SRC-007** | E-Commerce KSA | Salla & Zid Platform Statistics | `https://salla.com/`, `https://zid.sa/` | Over 50,000 active merchant stores across Saudi Arabia; primary sectors are perfumes, fashion/abayas, cosmetics, and food gifts. | November 2026 |
 | **SRC-008** | Methodology | Superpowers Framework | `https://github.com/obra/superpowers` | Specification, structured lifecycle (brainstorming, writing-plans, test-driven development Red-Green-Refactor, systematic debugging, verification). | November 2026 |
+

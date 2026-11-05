@@ -42,3 +42,4 @@ END IF;
 ## 3. Consequences
 - **Positive:** Mathematically impossible to overspend credits; every single credit movement is audit-logged with timestamps and job IDs; failed generations cost the user zero credits.
 - **Negative:** Requires row locks during reservation, which is mitigated by fast, indexed lookups on `workspaceId`.
+

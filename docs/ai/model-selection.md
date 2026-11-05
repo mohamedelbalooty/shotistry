@@ -33,3 +33,4 @@ Rather than relying on a single monolithic model for all workflows, Shotistry im
    - **Why:** Delivers unmatched physical realism, surface scattering, specular highlights, contact shadows, and respects inpainting masks so logos and packaging remain razor-sharp.
 3. **Conversational Quick Variations (`gemini-2.5-flash-image`):**
    - **Why:** When users want rapid creative exploration (e.g. "make the lighting warmer", "add flower petals around the bottle"), multimodal conversational editing provides rapid turnarounds.
+
