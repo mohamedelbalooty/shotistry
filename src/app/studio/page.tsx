@@ -1,10 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { REGIONAL_PHOTOSHOOT_PRESETS } from '../../lib/ai/presets';
-import { PromptSynthesizer } from '../../lib/ai/prompt-synthesizer';
-import { GeminiClient } from '../../lib/ai/gemini-client';
 import { AspectRatio, GenerationResult } from '../../lib/types';
 import {
   UploadCloud,
@@ -13,14 +11,57 @@ import {
   Layers,
   Download,
   RotateCcw,
-  CheckCircle,
   AlertCircle,
   ShieldCheck,
   Maximize2,
+  Cpu,
 } from 'lucide-react';
 
+/**
+ * Generates a clean, real base64 PNG product bottle image on an HTML5 canvas
+ * so sample studio sessions execute the real pixel segmentation & compositing pipeline.
+ */
+function buildSampleProductCanvasDataUrl(): string {
+  if (typeof document === 'undefined') return '';
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+
+  // Pure studio white background for clean foreground segmentation
+  ctx.fillStyle = '#fcfcfc';
+  ctx.fillRect(0, 0, 96, 96);
+
+  // Bottle cap & neck (metallic gold)
+  ctx.fillStyle = '#d4af37';
+  ctx.fillRect(39, 12, 18, 12);
+
+  // Perfume bottle body (deep royal crimson/oud)
+  ctx.fillStyle = '#7a1c2e';
+  ctx.fillRect(26, 24, 44, 58);
+
+  // Specular highlight bar
+  ctx.fillStyle = '#9c2b41';
+  ctx.fillRect(30, 26, 6, 54);
+
+  // Center luxury gold label
+  ctx.fillStyle = '#f2d06b';
+  ctx.fillRect(32, 40, 32, 24);
+
+  return canvas.toDataURL('image/png');
+}
+
 export default function StudioPage() {
-  const { t, credits, deductCredit, addToHistory, history } = useApp();
+  const {
+    t,
+    workspaceId,
+    userId,
+    credits,
+    syncCredits,
+    addToHistory,
+    history,
+  } = useApp();
 
   // Wizard state
   const [productTitle, setProductTitle] = useState('عطر مسك العود الملكي');
@@ -28,9 +69,7 @@ export default function StudioPage() {
   const [selectedPresetId, setSelectedPresetId] = useState('gulf_luxury_marble');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [customDirectives, setCustomDirectives] = useState('');
-  const [uploadedImage, setUploadedImage] = useState<string | null>(
-    'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&q=80'
-  );
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -38,7 +77,13 @@ export default function StudioPage() {
   const [activeResult, setActiveResult] = useState<GenerationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // File upload simulation/handler
+  useEffect(() => {
+    const sample = buildSampleProductCanvasDataUrl();
+    if (sample) {
+      setUploadedImage(sample);
+    }
+  }, []);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -70,46 +115,48 @@ export default function StudioPage() {
     setIsGenerating(true);
 
     try {
-      // Step 1: Synthesize Prompt using 10-Component Engine
-      setProgressStep('جاري صياغة أمر الإضاءة والاستوديو...');
-      await new Promise((r) => setTimeout(r, 400));
+      setProgressStep('عزل خلفية المنتج واستخراج قناع الدقة (Alpha Mask)...');
 
-      const synthesized = PromptSynthesizer.synthesize({
-        productTitle,
-        productCategory,
-        presetId: selectedPresetId,
-        aspectRatio,
-        customDirectives: customDirectives.trim() || undefined,
+      const response = await fetch('/api/photoshoots/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-workspace-id': workspaceId,
+          'x-user-id': userId,
+        },
+        body: JSON.stringify({
+          workspaceId,
+          productTitle,
+          productCategory,
+          presetId: selectedPresetId,
+          aspectRatio,
+          customDirectives: customDirectives.trim() || undefined,
+          rawImageBase64: uploadedImage,
+        }),
       });
 
-      // Step 2: Product Mask Locking & Inpainting Pass
-      setProgressStep('قفل تفاصيل المنتج وحماية الشعار (Fidelity Lock)...');
-      await new Promise((r) => setTimeout(r, 600));
+      const payload = await response.json();
 
-      // Step 3: AI Model Inference
-      setProgressStep('معالجة المشهد ورسم الانعكاسات عبر Google Gemini...');
-      const client = new GeminiClient();
-      const jobId = `job_${Date.now()}`;
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.error || 'حدث خطأ أثناء التوليد في الخادم. لم يتم خصم أي رصيد.'
+        );
+      }
 
-      const result = await client.generateProductPhoto(jobId, {
-        prompt: synthesized.fullPrompt,
-        negativePrompt: synthesized.negativePrompt,
-        aspectRatio,
-        model: synthesized.targetModel,
-      });
-
-      // Deduct credit upon confirmed generation
-      const deducted = deductCredit(1);
-      if (!deducted) {
-        throw new Error('حدث خطأ في خصم الرصيد');
+      const result: GenerationResult = payload.data;
+      if (typeof result.remainingCredits === 'number') {
+        syncCredits(result.remainingCredits);
       }
 
       setActiveResult(result);
       addToHistory(result);
       setProgressStep('');
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || 'حدث خطأ أثناء التوليد. يرجى المحاولة مرة أخرى.');
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'حدث خطأ أثناء التوليد. يرجى المحاولة مرة أخرى.';
+      setErrorMessage(msg);
     } finally {
       setIsGenerating(false);
     }
@@ -125,21 +172,23 @@ export default function StudioPage() {
             <span>{t.studioTitle}</span>
           </h1>
           <p className="text-gray-400 text-sm mt-1">
-            صمم جلسة تصوير إعلانية متكاملة لمنتجك في 3 خطوات بسيطة
+            تحويل فعلي لصورة منتجك عبر عزل الخلفية ودمج الإضاءة وحفظ هوية المنتج
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="px-4 py-2 rounded-xl bg-dark-900 border border-dark-800 text-xs">
             <span className="text-gray-400">{t.remainingCredits} </span>
-            <span className="font-bold text-brand-400 text-sm">{credits}</span>{' '}
+            <span className="font-bold text-brand-400 text-sm" data-testid="studio-credits">
+              {credits}
+            </span>{' '}
             <span className="text-gray-400">{t.credits}</span>
           </div>
         </div>
       </div>
 
       {errorMessage && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-3 animate-shake">
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-3">
           <AlertCircle className="w-5 h-5 shrink-0" />
           <span>{errorMessage}</span>
         </div>
@@ -170,12 +219,12 @@ export default function StudioPage() {
                   <div className="relative w-32 h-32 mx-auto rounded-lg overflow-hidden border border-dark-700 shadow-md">
                     <img
                       src={uploadedImage}
-                      alt="Uploaded Preview"
-                      className="w-full h-full object-cover"
+                      alt="Uploaded Product Preview"
+                      className="w-full h-full object-contain bg-white"
                     />
                   </div>
                   <p className="text-xs text-brand-400 font-medium">
-                    ✓ تم تحميل الصورة بنجاح (انقر لتغييرها)
+                    ✓ صورة المنتج جاهزة للعزل والدمج (انقر لرفع صورة أخرى)
                   </p>
                 </div>
               ) : (
@@ -357,16 +406,30 @@ export default function StudioPage() {
         {/* Right Column: Generation Canvas & Results View */}
         <div className="lg:col-span-7 space-y-6">
           <div className="rounded-2xl bg-dark-900 border border-dark-800 p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-dark-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-dark-800">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-brand-400" />
                 <span>{t.resultTitle}</span>
               </h2>
               {activeResult && (
-                <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                  <ShieldCheck className="w-4 h-4" />
-                  {t.fidelityVerified}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>
+                      حفظ بكسلات المنتج: {(activeResult.fidelityScore * 100).toFixed(1)}%
+                    </span>
+                  </span>
+                  {activeResult.synthIdDetected ? (
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-brand-500/10 border border-brand-500/30 text-brand-300 font-medium">
+                      SynthID Verified ({activeResult.modelUsed})
+                    </span>
+                  ) : (
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 font-medium flex items-center gap-1">
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>وضع الدمج المحلي (Sandbox Composite)</span>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -380,22 +443,51 @@ export default function StudioPage() {
                   <p className="text-base font-bold text-white">{t.generating}</p>
                   <p className="text-xs text-brand-400 font-medium">{progressStep}</p>
                 </div>
-                <p className="text-xs text-gray-500 max-w-xs">
-                  يتم الآن تشكيل الإضاءة والمعالم المحيطة مع حماية أبعاد المنتج الأصلية 100%.
-                </p>
               </div>
             ) : activeResult ? (
               <div className="space-y-4">
                 <div className="relative rounded-xl overflow-hidden bg-dark-950 border border-brand-500/30 aspect-square shadow-2xl">
                   <img
                     src={activeResult.imageUrl}
-                    alt="Active Result"
-                    className="w-full h-full object-cover"
+                    alt="Active Studio Result"
+                    className="w-full h-full object-contain"
                   />
                   <div className="absolute top-3 end-3 px-2.5 py-1 rounded bg-dark-950/80 backdrop-blur text-xs text-gray-200 border border-dark-700">
-                    {activeResult.aspectRatio} | {activeResult.resolution}
+                    {activeResult.aspectRatio} | {activeResult.resolution} | {activeResult.modelUsed}
                   </div>
                 </div>
+
+                {/* Mask & Isolated Product Inspection Bar */}
+                {(activeResult.maskImageUrl || activeResult.isolatedProductUrl) && (
+                  <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-dark-950 border border-dark-800 text-xs">
+                    {activeResult.isolatedProductUrl && (
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={activeResult.isolatedProductUrl}
+                          alt="Isolated Product Foreground"
+                          className="w-12 h-12 rounded border border-dark-700 object-contain bg-dark-900"
+                        />
+                        <div>
+                          <div className="font-bold text-gray-200">المنتج المعزول</div>
+                          <div className="text-gray-500">Foreground RGBA</div>
+                        </div>
+                      </div>
+                    )}
+                    {activeResult.maskImageUrl && (
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={activeResult.maskImageUrl}
+                          alt="Binary Alpha Mask"
+                          className="w-12 h-12 rounded border border-dark-700 object-contain bg-black"
+                        />
+                        <div>
+                          <div className="font-bold text-gray-200">قناع الحماية الثنائي</div>
+                          <div className="text-gray-500">Binary Alpha Mask</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Actions: Download & Regenerate */}
                 <div className="flex flex-wrap items-center gap-3">
@@ -437,7 +529,7 @@ export default function StudioPage() {
                   لوحة استعراض جلسة التصوير فارغة حالياً
                 </p>
                 <p className="text-xs text-gray-500 max-w-sm">
-                  ارفع صورة منتجك من القائمة الجانبية واختر النمط المفضل، ثم اضغط على "توليد جلسة التصوير" لمشاهدة النتائج بدقة استوديو تجاري.
+                  ارفع صورة منتجك من القائمة الجانبية واختر النمط المفضل، ثم اضغط على &quot;توليد جلسة التصوير&quot; لمشاهدة النتائج بدقة استوديو تجاري.
                 </p>
               </div>
             )}
@@ -472,4 +564,3 @@ export default function StudioPage() {
     </div>
   );
 }
-

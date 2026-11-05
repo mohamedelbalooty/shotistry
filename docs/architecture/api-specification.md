@@ -34,7 +34,7 @@
 - **Response (201):** `{ photoshoot: { id, title, stylePreset } }`
 
 ### `POST /api/photoshoots/[id]/generate`
-- **Request Body:** `{ modelTarget?: "imagen-3.0-generate-002" | "gemini-2.5-flash-image", count: number }`
+- **Request Body:** `{ productTitle: string, productCategory: string, presetId: string, aspectRatio: "1:1" | "4:5" | "9:16" | "16:9", rawImageBase64: string, model?: "gemini-nano-banana-2.1" | "gemini-3-pro-image" | "gemini-3.1-flash-lite-image" }`
 - **Response (202 Accepted):** `{ jobId, status: "QUEUED", estimatedWaitSeconds: 5, creditsReserved: 1 }`
 - **Behavior:**
   1. Validates available balance via `CreditLedger`.

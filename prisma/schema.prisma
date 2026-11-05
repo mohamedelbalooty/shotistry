@@ -49,6 +49,7 @@ enum ReservationStatus {
 }
 
 enum LedgerTransactionType {
+  TRIAL_GRANT
   SUBSCRIPTION_GRANT
   TOP_UP_PURCHASE
   JOB_SETTLEMENT
@@ -168,7 +169,7 @@ model PromptVersion {
   version     Int            @default(1)
   basePrompt  String         @db.Text
   negPrompt   String?        @db.Text
-  modelTarget String         @default("imagen-3.0-generate-002")
+  modelTarget String         @default("gemini-nano-banana-2.1")
   isCurrent   Boolean        @default(true)
   createdAt   DateTime       @default(now())
 
@@ -220,7 +221,9 @@ model GeneratedImage {
   aspectRatio     String        @default("1:1")
   seed            BigInt?
   isFavorite      Boolean       @default(false)
-  synthIdDetected Boolean       @default(true)
+  synthIdDetected Boolean       @default(false)
+  fidelityScore   Float         @default(1.0)
+  executionMode   String        @default("LIVE_GEMINI_API")
   createdAt       DateTime      @default(now())
 
   generationJob   GenerationJob @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
@@ -245,14 +248,15 @@ model Subscription {
 }
 
 model CreditLedger {
-  id           String                @id @default(uuid())
-  workspaceId  String
-  amount       Int
-  balanceAfter Int
-  type         LedgerTransactionType
-  referenceId  String?
-  description  String?
-  createdAt    DateTime              @default(now())
+  id             String                @id @default(uuid())
+  workspaceId    String
+  amount         Int
+  balanceAfter   Int
+  type           LedgerTransactionType
+  referenceId    String?
+  idempotencyKey String?               @unique
+  description    String?
+  createdAt      DateTime              @default(now())
 
   workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 

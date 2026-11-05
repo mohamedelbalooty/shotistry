@@ -2,7 +2,7 @@
 
 ## 1. Project Overview & Mission
 **Shotistry** is an enterprise-grade, AI-powered commercial product photography SaaS platform tailored for e-commerce brands, social-commerce merchants, and marketing agencies in **Egypt (EGP)** and **Saudi Arabia (SAR)**.
-It transforms raw, phone-captured product photos into ultra-realistic commercial studio photography using Google Gemini models and Imagen 3 via `@google/genai`, monetized through Paymob recurring subscriptions and credit packages, deployed on Vercel with Next.js, TypeScript, PostgreSQL, and an immutable double-entry credit ledger.
+It transforms raw, phone-captured product photos into ultra-realistic commercial studio photography using Google Gemini Nano Banana models (`gemini-nano-banana-2.1`, `gemini-3-pro-image`, `gemini-3.1-flash-lite-image`) via `@google/genai` (`ai.interactions.create`), monetized through Paymob recurring subscriptions and credit packages, deployed on Vercel with Next.js, TypeScript, PostgreSQL/SQLite ACID persistence, and an immutable double-entry credit ledger.
 
 ---
 
@@ -44,7 +44,7 @@ This project strictly enforces the **Superpowers** engineering methodology (Jess
 - **Frontend / Framework:** Next.js 15+ (App Router), React 19, TypeScript (strict mode enabled).
 - **Styling & UI:** Tailwind CSS, Radix UI / Lucide React, bilingual RTL/LTR layout primitives (`dir="rtl"` / `dir="ltr"`).
 - **Database & Persistence:** PostgreSQL with Prisma ORM / raw typed SQL for high-concurrency ledger operations.
-- **AI Engine:** Google Gemini API (`@google/genai`) supporting multimodal image editing and Imagen 3 (`imagen-3.0-generate-002`) with prompt synthesis and product fidelity preservation.
+- **AI Engine:** Google Gemini Interactions API (`@google/genai` `ai.interactions.create`) using `gemini-nano-banana-2.1` (default multimodal product reference & mask generation), `gemini-3-pro-image` (4K studio rendering), and `gemini-3.1-flash-lite-image` (high-efficiency previews) paired with foreground product isolation and pixel-fidelity verification (`src/lib/ai/image-processor.ts`). Note: Legacy `imagen-3.0-generate-002` (shut down Nov 10, 2025) and `imagen-4.0-*` (shut down Aug 17, 2026) are retired and must never be used.
 - **Payments:** Paymob Unified Checkout & Subscriptions API with HMAC-SHA512 webhook authentication and idempotent execution.
 - **Storage:** Cloudflare R2 / S3-compatible object storage with signed upload and CDN delivery.
 - **Credit & Ledger:** Double-entry credit reservation/settlement/refund engine. Mutations must run inside atomic database transactions (`SERIALIZABLE` or `SELECT FOR UPDATE`).

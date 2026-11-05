@@ -1,103 +1,101 @@
 import { describe, it } from 'node:test';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { PaymobSecurity } from '../src/lib/paymob/paymob-hmac.ts';
 
-describe('Paymob Cryptographic Security & Webhook Tests', () => {
-  const SECRET_KEY = 'test_secret_hmac_key_12345';
+describe('Paymob HMAC-SHA512 Security & Currency Subunit Tests', () => {
+  const secret = 'test_paymob_hmac_secret_key_998877';
 
-  it('should accurately calculate Subscription HMAC-SHA512 using trigger_type + "for" + id', () => {
-    const triggerType = 'Subscription Created';
-    const subscriptionId = 1264;
+  it('matches an independent known HMAC-SHA512 hex vector for subscription concatenation ("Subscription Createdfor849201")', () => {
+    // Independent HMAC-SHA512 digest of message "Subscription Createdfor849201" with key "shotistry_fixed_vector_key"
+    const fixedKey = 'shotistry_fixed_vector_key';
+    const expectedIndependentHex =
+      '064b84c0034fef1dc8e97f879ab190393befade208498c8ecad8614b577cc701484762f875e7c49efd3eba90ff7c534d879249ea1acfcac0acafa13dc9a611a2';
 
-    const calculatedHmac = PaymobSecurity.calculateSubscriptionHmac(
-      triggerType,
-      subscriptionId,
-      SECRET_KEY
+    const calculated = PaymobSecurity.calculateSubscriptionHmac(
+      'Subscription Created',
+      849201,
+      fixedKey
     );
-
-    assert.ok(typeof calculatedHmac === 'string');
-    assert.strictEqual(calculatedHmac.length, 128); // SHA-512 hex length is 128 chars
+    assert.strictEqual(calculated, expectedIndependentHex);
   });
 
-  it('should successfully verify a valid Paymob subscription webhook payload', () => {
+  it('correctly calculates and verifies valid Subscription Webhook HMAC', () => {
     const triggerType = 'Subscription Created';
-    const subscriptionId = 9876;
-    const validHmac = PaymobSecurity.calculateSubscriptionHmac(triggerType, subscriptionId, SECRET_KEY);
+    const subId = 849201;
 
-    const payload = {
-      trigger_type: triggerType,
-      subscription_data: { id: subscriptionId },
-      hmac: validHmac
-    };
+    const validHmac = PaymobSecurity.calculateSubscriptionHmac(triggerType, subId, secret);
 
-    const isVerified = PaymobSecurity.verifySubscriptionWebhook(payload, SECRET_KEY);
+    const isVerified = PaymobSecurity.verifySubscriptionWebhook(
+      {
+        trigger_type: triggerType,
+        subscription_data: { id: subId },
+        hmac: validHmac,
+      },
+      secret
+    );
+
     assert.strictEqual(isVerified, true);
   });
 
-  it('should reject a tampered subscription webhook payload', () => {
-    const validHmac = PaymobSecurity.calculateSubscriptionHmac('Subscription Created', 100, SECRET_KEY);
+  it('rejects tampered Subscription Webhook payloads', () => {
+    const triggerType = 'Subscription Created';
+    const subId = 849201;
+    const validHmac = PaymobSecurity.calculateSubscriptionHmac(triggerType, subId, secret);
 
-    // Tampered: Attacker modifies id from 100 to 200
-    const tamperedPayload = {
-      trigger_type: 'Subscription Created',
-      subscription_data: { id: 200 },
-      hmac: validHmac
-    };
+    const isVerified = PaymobSecurity.verifySubscriptionWebhook(
+      {
+        trigger_type: triggerType,
+        subscription_data: { id: 999999 },
+        hmac: validHmac,
+      },
+      secret
+    );
 
-    const isVerified = PaymobSecurity.verifySubscriptionWebhook(tamperedPayload, SECRET_KEY);
     assert.strictEqual(isVerified, false);
   });
 
-  it('should reject verification when secret key is incorrect', () => {
-    const validHmac = PaymobSecurity.calculateSubscriptionHmac('renewed', 555, SECRET_KEY);
-
-    const payload = {
-      trigger_type: 'renewed',
-      subscription_data: { id: 555 },
-      hmac: validHmac
-    };
-
-    const isVerified = PaymobSecurity.verifySubscriptionWebhook(payload, 'wrong_secret_key');
-    assert.strictEqual(isVerified, false);
-  });
-
-  it('should verify standard transaction HMACs across ordered fields', () => {
-    const txnData = {
-      amount_cents: 89900,
-      created_at: '2026-11-05T12:00:00',
+  it('correctly calculates and verifies standard 20-field Transaction Webhook HMAC', () => {
+    const sampleTxn = {
+      amount_cents: 69900,
+      created_at: '2025-05-01T12:00:00.000Z',
       currency: 'EGP',
       error_occured: false,
       has_parent_transaction: false,
-      id: 998877,
-      integration_id: 12345,
+      id: 192837465,
+      integration_id: 441122,
       is_3d_secure: true,
       is_auth: false,
-      is_capture: true,
+      is_capture: false,
       is_refunded: false,
       is_standalone_payment: true,
       is_voided: false,
-      'order.id': 54321,
-      owner: 111,
+      order: { id: 55667788 },
+      owner: 112233,
       pending: false,
-      'source_data.pan': '2345',
-      'source_data.sub_type': 'MasterCard',
-      'source_data.type': 'card',
-      success: true
+      source_data: {
+        pan: '2346',
+        sub_type: 'MasterCard',
+        type: 'card',
+      },
+      success: true,
     };
 
-    const hmac = PaymobSecurity.calculateTransactionHmac(txnData, SECRET_KEY);
-    assert.ok(typeof hmac === 'string');
-    assert.strictEqual(hmac.length, 128);
+    const hmac = PaymobSecurity.calculateTransactionHmac(sampleTxn, secret);
+    const verified = PaymobSecurity.verifyTransactionWebhook(hmac, sampleTxn, secret);
+    assert.strictEqual(verified, true);
 
-    const isValid = PaymobSecurity.verifyTransactionWebhook(hmac, txnData, SECRET_KEY);
-    assert.strictEqual(isValid, true);
+    const tamperedTxn = { ...sampleTxn, amount_cents: 100 };
+    const verifiedTampered = PaymobSecurity.verifyTransactionWebhook(
+      hmac,
+      tamperedTxn,
+      secret
+    );
+    assert.strictEqual(verifiedTampered, false);
   });
 
-  it('should convert currency subunits accurately (EGP piastres / SAR halalas)', () => {
-    assert.strictEqual(PaymobSecurity.toSubunits(899), 89900);
-    assert.strictEqual(PaymobSecurity.toSubunits(189.5), 18950);
-    assert.strictEqual(PaymobSecurity.fromSubunits(89900), 899);
-    assert.strictEqual(PaymobSecurity.fromSubunits(18950), 189.5);
+  it('converts EGP and SAR major units to cents/halalas accurately', () => {
+    assert.strictEqual(PaymobSecurity.toSubunits(699), 69900);
+    assert.strictEqual(PaymobSecurity.toSubunits(149), 14900);
+    assert.strictEqual(PaymobSecurity.fromSubunits(189900), 1899);
   });
 });
-

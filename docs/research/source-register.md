@@ -2,7 +2,7 @@
 
 | Source ID | Category | Official Source / Entity | URL / Document | Verified Factual Claim | Verification Date |
 |---|---|---|---|---|---|
-| **SRC-001** | AI Engine | Google AI for Developers | `https://ai.google.dev/gemini-api/docs/image-generation` | Google GenAI SDK (`@google/genai`) supports native multimodal image generation & editing, and Imagen 3 (`imagen-3.0-generate-002`) with mask inpainting and SynthID watermarking. | November 2026 |
+| **SRC-001** | AI Engine | Google AI for Developers | `https://ai.google.dev/gemini-api/docs/image-generation` | Google GenAI SDK (`@google/genai`) Interactions API (`ai.interactions.create`) supports native multimodal reference-image generation & mask conditioning via `gemini-nano-banana-2.1`, `gemini-3-pro-image`, and `gemini-3.1-flash-lite-image` (replacing shut-down Imagen 3/4). | November 2026 |
 | **SRC-002** | AI Pricing | Google AI Pricing Portal | `https://ai.google.dev/gemini-api/docs/pricing` | Imagen 3 image generation baseline cost is ~$0.030 per standard image; multimodal Flash image tokens cost ~$0.03 to $0.06 per 1K image; batch generation offers 50% discount. | November 2026 |
 | **SRC-003** | Payments | Paymob Developers Documentation | `https://developers.paymob.com/` | Paymob Intention API provides unified checkout; Subscription API supports recurring 30-day billing intervals; Webhook uses HMAC-SHA512 verification (`${trigger_type}for${subscriptionId}`). | November 2026 |
 | **SRC-004** | Competitor | Pebblely Pricing Portal | `https://pebblely.com/pricing/` | Pebblely plans: Lite $9 (30 imgs), Basic $19 (200 imgs), Pro $39 (500 imgs); unused credits expire monthly with no rollover. | November 2026 |

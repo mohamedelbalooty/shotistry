@@ -1,29 +1,29 @@
 # Pricing Strategy: Egypt (EGP) and Saudi Arabia (SAR)
 
 ## 1. Regional Pricing Philosophy
-We reject the one-size-fits-all USD pricing model of Western competitors ($19–$39/mo on Stripe). Instead, Shotistry employs purchasing-power-adjusted, localized pricing designed to maximize market penetration while guaranteeing high gross margins (>70%).
+We reject the one-size-fits-all USD pricing model of Western competitors ($19–$39/mo on Stripe). Instead, Shotistry employs purchasing-power-adjusted, localized pricing designed to maximize market penetration while guaranteeing high gross margins.
 
 ---
 
-## 2. Subscription Package Architecture
+## 2. Subscription Package Architecture (Synchronized with `src/lib/pricing/plans.ts`)
 
 ### A. Egyptian Market (Billed in EGP via Paymob)
 
 | Plan Tier | Price (Monthly) | Included Credits | USD Equiv. | Effective Cost / Credit | Target Customer | Key Features Included |
 |---|---|---|---|---|---|---|
-| **Free Trial** | **0 EGP** | 5 Credits | $0.00 | 0.00 EGP | New signups | 1 Brand, standard resolution, subtle watermark, web download |
-| **Starter** | **349 EGP / mo** | 80 Credits | ~$7.12 | 4.36 EGP | Solo Instagram / TikTok sellers | 1 Brand profile, HD export, no watermark, standard presets |
-| **Pro (Recommended)** | **899 EGP / mo** | 200 Credits | ~$18.35 | 4.50 EGP | Active e-commerce boutiques | 3 Brand profiles, 4K export, custom prompts, seasonal presets |
-| **Agency / Studio** | **1,899 EGP / mo** | 500 Credits | ~$38.75 | 3.80 EGP | Marketing agencies & top brands | Unlimited brands, 5 team seats, batch generation, priority queue |
+| **Free Trial** | **0 EGP** | 5 Credits | $0.00 | 0.00 EGP | New signups | 5 trial credits, 1K resolution, 1 Brand profile |
+| **Starter** | **349 EGP / mo** | 80 Credits | ~$6.98 | 4.36 EGP | Solo Instagram / TikTok sellers | 80 monthly credits, HD export, zero watermarks, commercial license |
+| **Pro (Recommended)** | **899 EGP / mo** | 200 Credits | ~$17.98 | 4.50 EGP | Active e-commerce boutiques | 200 monthly credits, 4K export, 3 Brand profiles, regional presets |
+| **Agency / Studio** | **1,899 EGP / mo** | 500 Credits | ~$37.98 | 3.80 EGP | Marketing agencies & top brands | 500 monthly credits, 4K export, unlimited brands, 5 team seats |
 
 ### B. Saudi Arabian Market (Billed in SAR via Paymob)
 
 | Plan Tier | Price (Monthly) | Included Credits | USD Equiv. | Effective Cost / Credit | Target Customer | Key Features Included |
 |---|---|---|---|---|---|---|
-| **Free Trial** | **0 SAR** | 5 Credits | $0.00 | 0.00 SAR | New store testing | 1 Brand, standard resolution, subtle watermark |
-| **Starter** | **79 SAR / mo** | 100 Credits | ~$21.06 | 0.79 SAR | Emerging Salla & Zid stores | 1 Brand profile, HD export, no watermark, standard presets |
-| **Pro (Recommended)** | **189 SAR / mo** | 300 Credits | ~$50.40 | 0.63 SAR | Growing e-commerce brands | 3 Brand profiles, 4K export, Gulf Luxury & Ramadan presets |
-| **Agency / Studio** | **399 SAR / mo** | 800 Credits | ~$106.40 | 0.50 SAR | Agencies & multi-brand retailers | Unlimited brands, 5 team seats, batch catalog generation |
+| **Free Trial** | **0 SAR** | 5 Credits | $0.00 | 0.00 SAR | New store testing | 5 trial credits, 1K resolution, 1 Brand profile |
+| **Starter** | **79 SAR / mo** | 80 Credits | ~$21.07 | 0.99 SAR | Emerging Salla & Zid stores | 80 monthly credits, HD export, zero watermarks, commercial license |
+| **Pro (Recommended)** | **189 SAR / mo** | 200 Credits | ~$50.40 | 0.95 SAR | Growing e-commerce brands | 200 monthly credits, 4K export, 3 Brand profiles, regional presets |
+| **Agency / Studio** | **399 SAR / mo** | 500 Credits | ~$106.40 | 0.80 SAR | Agencies & multi-brand retailers | 500 monthly credits, 4K export, unlimited brands, 5 team seats |
 
 ---
 
@@ -31,15 +31,14 @@ We reject the one-size-fits-all USD pricing model of Western competitors ($19–
 
 | Top-Up Pack | Egypt Price (EGP) | Saudi Arabia Price (SAR) | Effective Price / Credit |
 |---|---|---|---|
-| **50 Bonus Credits** | 249 EGP | 49 SAR | ~4.98 EGP / ~0.98 SAR |
-| **150 Bonus Credits** | 599 EGP | 119 SAR | ~3.99 EGP / ~0.79 SAR |
-| **500 Bonus Credits** | 1,499 EGP | 299 SAR | ~3.00 EGP / ~0.60 SAR |
+| **50 Extra Credits (`pack_50`)** | 249 EGP | 49 SAR | ~4.98 EGP / ~0.98 SAR |
+| **150 Extra Credits (`pack_150`)** | 599 EGP | 119 SAR | ~3.99 EGP / ~0.79 SAR |
+| **500 Extra Credits (`pack_500`)** | 1,499 EGP | 299 SAR | ~3.00 EGP / ~0.60 SAR |
 
 ---
 
 ## 4. Upgrade, Downgrade & Cancellation Policies
-- **Upgrades:** Immediate proration. The customer is charged the prorated difference for the remaining days in the cycle, and the higher credit tier is unlocked immediately.
+- **Upgrades:** Immediate activation upon verified Paymob HMAC-SHA512 webhook receipt.
 - **Downgrades:** Takes effect at the end of the current 30-day billing period.
-- **Cancellations:** 1-click self-serve cancellation from the billing dashboard. The user retains their remaining credits and access until the end of their current paid 30-day cycle.
-- **Refund Policy:** Guaranteed 7-day refund if fewer than 10 credits have been consumed. Once a substantial volume of generations is processed, refunds are not issued to prevent API cost abuse.
-
+- **Cancellations:** Self-serve cancellation sets `Subscription.status = 'CANCELED'` and `cancelAtPeriodEnd = true` via webhook lifecycle handling.
+- **Zero-Loss Failed Generation Guarantee:** Every generation job reserves credits in `CreditReservation` (`PENDING`) before calling the AI pipeline; if generation fails for any reason, `releaseReservation` automatically releases the hold so the customer loses **0 credits**.

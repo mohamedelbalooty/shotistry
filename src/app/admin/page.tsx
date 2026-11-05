@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   Shield,
@@ -8,96 +8,123 @@ import {
   DollarSign,
   Users,
   Activity,
-  AlertTriangle,
   Sparkles,
-  Search,
   CheckCircle,
   Database,
   Lock,
+  RefreshCw,
 } from 'lucide-react';
 
-export default function AdminPage() {
-  const { t, addCredits } = useApp();
+interface AdminJobRow {
+  id: string;
+  product: string;
+  preset: string;
+  model: string;
+  status: string;
+  cost: string;
+  user: string;
+  createdAt: string;
+}
 
-  // Simulated live telemetry metrics
-  const [metrics] = useState({
-    totalUsers: 1480,
-    payingSubscribers: 184,
-    mrrUsd: 5880,
-    mrrSar: 16250,
-    mrrEgp: 76400,
-    grossMarginPercent: 76.8,
-    aiExpensesUsd: 1360,
-    generationSuccessRate: 98.4,
-    totalImagesGenerated: 42180,
+interface AdminMetricsData {
+  totalUsers: number;
+  payingSubscribers: number;
+  mrrUsd: number;
+  mrrSar: number;
+  mrrEgp: number;
+  grossMarginPercent: number;
+  aiExpensesUsd: number;
+  generationSuccessRate: number;
+  totalImagesGenerated: number;
+  recentJobs: AdminJobRow[];
+  systemStatus: {
+    geminiEngine: string;
+    paymobGateways: string;
+    database: string;
+    storage: string;
+  };
+}
+
+export default function AdminPage() {
+  const { t, workspaceId, refreshWorkspace } = useApp();
+
+  const [metrics, setMetrics] = useState<AdminMetricsData>({
+    totalUsers: 0,
+    payingSubscribers: 0,
+    mrrUsd: 0,
+    mrrSar: 0,
+    mrrEgp: 0,
+    grossMarginPercent: 0,
+    aiExpensesUsd: 0,
+    generationSuccessRate: 0,
+    totalImagesGenerated: 0,
+    recentJobs: [],
+    systemStatus: {
+      geminiEngine: 'SANDBOX_COMPOSITE',
+      paymobGateways: 'UNCONFIGURED_FAIL_CLOSED',
+      database: 'OPERATIONAL_ACID_SQL',
+      storage: 'OPERATIONAL_SIGNED_URLS',
+    },
   });
+  const [isLoading, setIsLoading] = useState(true);
 
   // Credit Adjustment State
-  const [adjustTargetEmail, setAdjustTargetEmail] = useState('tariq@oudstore.sa');
+  const [adjustTargetEmail, setAdjustTargetEmail] = useState(
+    'user-default-merchant@merchant.shotistry.app'
+  );
   const [adjustAmount, setAdjustAmount] = useState<number>(50);
-  const [adjustReason, setAdjustReason] = useState('تعويض تجريبي لترقية باقة برو');
+  const [adjustReason, setAdjustReason] = useState('تعويض خدمة عملاء موثق في سجل التدقيق');
   const [adjustmentNotice, setAdjustmentNotice] = useState<string | null>(null);
 
-  // Recent generation telemetry logs
-  const [recentJobs] = useState([
-    {
-      id: 'job_8841',
-      product: 'عطر مسك العود الملكي',
-      preset: 'الفخامة الخليجية (رخام ونحاس)',
-      model: 'imagen-3.0-generate-002',
-      latency: '5.2s',
-      status: 'SUCCESS',
-      cost: '$0.030',
-      user: 'tariq@oudstore.sa',
-      time: 'منذ دقيقتين',
-    },
-    {
-      id: 'job_8840',
-      product: 'حقيبة يد جلد طبيعي جملي',
-      preset: 'استوديو معماري معاصر',
-      model: 'imagen-3.0-generate-002',
-      latency: '4.8s',
-      status: 'SUCCESS',
-      cost: '$0.030',
-      user: 'nouran@leatherstudio.eg',
-      time: 'منذ 7 دقائق',
-    },
-    {
-      id: 'job_8839',
-      product: 'سيروم حمض الهيالورونيك',
-      preset: 'الطبيعة ورذاذ الماء',
-      model: 'imagen-3.0-generate-002',
-      latency: '6.1s',
-      status: 'SUCCESS',
-      cost: '$0.030',
-      user: 'dr_sara@clinics.sa',
-      time: 'منذ 14 دقيقة',
-    },
-    {
-      id: 'job_8838',
-      product: 'ساعة يد أوتوماتيكية سويسرية',
-      preset: 'الفخامة الخليجية',
-      model: 'imagen-3.0-generate-002',
-      latency: '8.4s',
-      status: 'FAILED',
-      cost: '$0.000 (تم استرداد الرصيد تلقائياً)',
-      user: 'agency@creativemedia.eg',
-      time: 'منذ 22 دقيقة',
-    },
-  ]);
+  const fetchMetrics = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/admin/metrics', {
+        headers: {
+          'x-user-role': 'ADMIN',
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMetrics(data);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const handleAdjustCredits = (e: React.FormEvent) => {
+  useEffect(() => {
+    void fetchMetrics();
+  }, [fetchMetrics]);
+
+  const handleAdjustCredits = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (adjustAmount <= 0) return;
+    if (!adjustAmount || adjustAmount === 0) return;
 
-    addCredits(adjustAmount);
-    setAdjustmentNotice(
-      `تم تعديل الرصيد بنجاح! تمت إضافة ${adjustAmount} رصيد للمستخدم (${adjustTargetEmail}) وتوثيق العملية في سجل التدقيق: "${adjustReason}".`
-    );
+    const res = await fetch('/api/admin/credits/adjust', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': 'ADMIN',
+      },
+      body: JSON.stringify({
+        targetEmail: adjustTargetEmail,
+        workspaceId,
+        amount: adjustAmount,
+        reason: adjustReason,
+      }),
+    });
 
-    setTimeout(() => {
-      setAdjustmentNotice(null);
-    }, 5000);
+    const data = await res.json();
+    if (res.ok && data.success) {
+      await refreshWorkspace();
+      await fetchMetrics();
+      setAdjustmentNotice(
+        `تم تعديل الرصيد الفعلي في قاعدة البيانات! الرصيد الجديد: ${data.newBalance} رصيد (معرّف التدقيق: ${data.auditLogId}).`
+      );
+    } else {
+      setAdjustmentNotice(data.error || 'فشل تعديل الرصيد');
+    }
   };
 
   return (
@@ -110,15 +137,18 @@ export default function AdminPage() {
             <span>{t.adminTitle}</span>
           </h1>
           <p className="text-gray-400 text-xs sm:text-sm mt-1">
-            مؤشرات الأداء المالي، مراقبة توليد الصور بالذكاء الاصطناعي، وإدارة أرصدة المشتركين
+            مؤشرات الأداء الفعلية المستخرجة مباشرة من قاعدة البيانات وسجل التدقيق المالي
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/20">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            جميع الأنظمة تعمل بكفاءة (Vercel / Gemini / Paymob)
-          </span>
+          <button
+            onClick={() => void fetchMetrics()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-dark-900 hover:bg-dark-800 text-gray-200 text-xs font-semibold border border-dark-700"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>تحديث البيانات الحية</span>
+          </button>
         </div>
       </div>
 
@@ -129,14 +159,14 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* KPI Financial Cards */}
+      {/* KPI Financial Cards (100% Real Database Aggregates) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <div className="rounded-2xl bg-dark-900 border border-dark-800 p-6 space-y-2">
           <div className="flex items-center justify-between text-gray-400">
             <span className="text-xs font-medium">{t.mrr}</span>
             <DollarSign className="w-4 h-4 text-brand-400" />
           </div>
-          <div className="text-2xl sm:text-3xl font-extrabold text-white">
+          <div className="text-2xl sm:text-3xl font-extrabold text-white" data-testid="admin-mrr-usd">
             ${metrics.mrrUsd.toLocaleString()}
           </div>
           <p className="text-[11px] text-gray-400">
@@ -152,7 +182,9 @@ export default function AdminPage() {
           <div className="text-2xl sm:text-3xl font-extrabold text-emerald-400">
             {metrics.grossMarginPercent}%
           </div>
-          <p className="text-[11px] text-gray-500">مستهدف التخطيط: 70–80% (محقق بامتياز)</p>
+          <p className="text-[11px] text-gray-500">
+            تكلفة Gemini الفعلية: ${metrics.aiExpensesUsd} ($0.0336 / 1K)
+          </p>
         </div>
 
         <div className="rounded-2xl bg-dark-900 border border-dark-800 p-6 space-y-2">
@@ -163,7 +195,9 @@ export default function AdminPage() {
           <div className="text-2xl sm:text-3xl font-extrabold text-white">
             {metrics.payingSubscribers}
           </div>
-          <p className="text-[11px] text-gray-500">من إجمالي {metrics.totalUsers.toLocaleString()} مشترك مسجل</p>
+          <p className="text-[11px] text-gray-500">
+            من إجمالي {metrics.totalUsers.toLocaleString()} مستخدم في قاعدة البيانات
+          </p>
         </div>
 
         <div className="rounded-2xl bg-dark-900 border border-dark-800 p-6 space-y-2">
@@ -174,7 +208,9 @@ export default function AdminPage() {
           <div className="text-2xl sm:text-3xl font-extrabold text-white">
             {metrics.generationSuccessRate}%
           </div>
-          <p className="text-[11px] text-gray-500">إجمالي {metrics.totalImagesGenerated.toLocaleString()} صورة مولدة</p>
+          <p className="text-[11px] text-gray-500">
+            إجمالي {metrics.totalImagesGenerated.toLocaleString()} صورة مولدة فعلياً
+          </p>
         </div>
       </div>
 
@@ -183,51 +219,55 @@ export default function AdminPage() {
         <div className="flex items-center justify-between pb-3 border-b border-dark-800">
           <h2 className="text-base font-bold text-white flex items-center gap-2">
             <Activity className="w-4 h-4 text-brand-400" />
-            <span>مراقبة عمليات التوليد الحية (Telemetry & Generation Jobs)</span>
+            <span>سجل عمليات التوليد الفعلية (Database GenerationJobs)</span>
           </h2>
-          <span className="text-xs text-gray-400">تحديث فوري</span>
+          <span className="text-xs text-gray-400">{metrics.recentJobs.length} عملية مسجلة</span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-start">
-            <thead>
-              <tr className="border-b border-dark-800 text-gray-400">
-                <th className="py-2.5 px-3 text-start">معرف العملية</th>
-                <th className="py-2.5 px-3 text-start">المنتج</th>
-                <th className="py-2.5 px-3 text-start">النمط الإقليمي</th>
-                <th className="py-2.5 px-3 text-start">النموذج</th>
-                <th className="py-2.5 px-3 text-start">زمن المعالجة</th>
-                <th className="py-2.5 px-3 text-start">الحالة</th>
-                <th className="py-2.5 px-3 text-start">التكلفة الفعلية</th>
-                <th className="py-2.5 px-3 text-start">المشترك</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-dark-800">
-              {recentJobs.map((job) => (
-                <tr key={job.id} className="hover:bg-dark-950/40">
-                  <td className="py-3 px-3 font-mono text-gray-300">{job.id}</td>
-                  <td className="py-3 px-3 font-semibold text-white">{job.product}</td>
-                  <td className="py-3 px-3 text-gray-300">{job.preset}</td>
-                  <td className="py-3 px-3 font-mono text-brand-400">{job.model}</td>
-                  <td className="py-3 px-3 text-gray-400">{job.latency}</td>
-                  <td className="py-3 px-3">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        job.status === 'SUCCESS'
-                          ? 'bg-emerald-500/10 text-emerald-400'
-                          : 'bg-rose-500/10 text-rose-400'
-                      }`}
-                    >
-                      {job.status === 'SUCCESS' ? 'ناجحة' : 'فشلت واستردت'}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-gray-300">{job.cost}</td>
-                  <td className="py-3 px-3 text-gray-400">{job.user}</td>
+        {metrics.recentJobs.length === 0 ? (
+          <p className="text-xs text-gray-500 py-6 text-center">
+            لا توجد عمليات توليد مسجلة في قاعدة البيانات حتى الآن. قم بتوليد صورة من الاستوديو لظهورها هنا فوراً.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-start">
+              <thead>
+                <tr className="border-b border-dark-800 text-gray-400">
+                  <th className="py-2.5 px-3 text-start">معرف العملية</th>
+                  <th className="py-2.5 px-3 text-start">المنتج</th>
+                  <th className="py-2.5 px-3 text-start">النمط الإقليمي</th>
+                  <th className="py-2.5 px-3 text-start">النموذج</th>
+                  <th className="py-2.5 px-3 text-start">الحالة</th>
+                  <th className="py-2.5 px-3 text-start">التكلفة الفعلية</th>
+                  <th className="py-2.5 px-3 text-start">المشترك</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-dark-800">
+                {metrics.recentJobs.map((job) => (
+                  <tr key={job.id} className="hover:bg-dark-950/40">
+                    <td className="py-3 px-3 font-mono text-gray-300">{job.id}</td>
+                    <td className="py-3 px-3 font-semibold text-white">{job.product}</td>
+                    <td className="py-3 px-3 text-gray-300">{job.preset}</td>
+                    <td className="py-3 px-3 font-mono text-brand-400">{job.model}</td>
+                    <td className="py-3 px-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          job.status === 'SUCCESS'
+                            ? 'bg-emerald-500/10 text-emerald-400'
+                            : 'bg-rose-500/10 text-rose-400'
+                        }`}
+                      >
+                        {job.status === 'SUCCESS' ? 'ناجحة' : 'فشلت واستردت'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-gray-300">{job.cost}</td>
+                    <td className="py-3 px-3 text-gray-400">{job.user}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Manual Credit Adjustment & Ledger Tool */}
@@ -238,7 +278,7 @@ export default function AdminPage() {
             <span>أداة تعديل أرصدة المشتركين (Audit Ledger Adjustment)</span>
           </h2>
           <p className="text-xs text-gray-400 leading-relaxed">
-            تسمح هذه الأداة لخدمة العملاء والإدارة بتعويض العملاء أو تعديل الأرصدة مع توثيق إلزامي في سجل التدقيق المالي.
+            تنفذ هذه الأداة قيداً محاسبياً في جدول CreditLedger وتكتب سجلاً دائماً في جدول AdminAuditLog.
           </p>
 
           <form onSubmit={handleAdjustCredits} className="space-y-3">
@@ -252,29 +292,22 @@ export default function AdminPage() {
                 className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">عدد الرصيد المراد إضافته</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="1000"
-                  value={adjustAmount}
-                  onChange={(e) => setAdjustAmount(Number(e.target.value))}
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">نوع العملية</label>
-                <select className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500">
-                  <option value="ADMIN_ADJUSTMENT">تعويض خدمة عملاء</option>
-                  <option value="BONUS">مكافأة شراكة</option>
-                </select>
-              </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">عدد الرصيد المراد إضافته</label>
+              <input
+                type="number"
+                min="1"
+                max="1000"
+                value={adjustAmount}
+                onChange={(e) => setAdjustAmount(Number(e.target.value))}
+                required
+                className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500"
+              />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">سبب التعديل (إلزامي للتدقيق المالي)</label>
+              <label className="text-xs text-gray-400 block mb-1">
+                سبب التعديل (إلزامي للتدقيق المالي)
+              </label>
               <input
                 type="text"
                 value={adjustReason}
@@ -289,12 +322,12 @@ export default function AdminPage() {
               className="w-full py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-white font-bold text-xs shadow transition-colors flex items-center justify-center gap-1.5"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>تنفيذ وتوثيق التعديل المالي</span>
+              <span>تنفيذ وتوثيق التعديل المالي في قاعدة البيانات</span>
             </button>
           </form>
         </div>
 
-        {/* Infrastructure & Status Cards */}
+        {/* Truthful Infrastructure & Status Cards */}
         <div className="rounded-2xl bg-dark-900 border border-dark-800 p-6 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2">
             <Database className="w-4 h-4 text-brand-400" />
@@ -304,40 +337,54 @@ export default function AdminPage() {
             <div className="p-3 rounded-xl bg-dark-950 border border-dark-800 flex items-center justify-between">
               <div>
                 <span className="font-bold text-white block">Google GenAI Engine</span>
-                <span className="text-gray-500">Imagen 3 & Gemini 2.5 Flash</span>
+                <span className="text-gray-500">
+                  gemini-nano-banana-2.1 &amp; gemini-3-pro-image
+                </span>
               </div>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold">
-                متصل وجاهز
+              <span
+                className={`px-2 py-0.5 rounded font-bold ${
+                  metrics.systemStatus.geminiEngine === 'LIVE_API_CONFIGURED'
+                    ? 'bg-emerald-500/10 text-emerald-400'
+                    : 'bg-amber-500/10 text-amber-400'
+                }`}
+              >
+                {metrics.systemStatus.geminiEngine}
               </span>
             </div>
 
             <div className="p-3 rounded-xl bg-dark-950 border border-dark-800 flex items-center justify-between">
               <div>
                 <span className="font-bold text-white block">Paymob Payment Gateway</span>
-                <span className="text-gray-500">Egypt (EGP) & Saudi Arabia (SAR) Webhooks</span>
+                <span className="text-gray-500">Fail-Closed HMAC-SHA512 Webhooks</span>
               </div>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold">
-                HMAC-SHA512 نشط
+              <span
+                className={`px-2 py-0.5 rounded font-bold ${
+                  metrics.systemStatus.paymobGateways === 'HMAC_CONFIGURED'
+                    ? 'bg-emerald-500/10 text-emerald-400'
+                    : 'bg-amber-500/10 text-amber-400'
+                }`}
+              >
+                {metrics.systemStatus.paymobGateways}
               </span>
             </div>
 
             <div className="p-3 rounded-xl bg-dark-950 border border-dark-800 flex items-center justify-between">
               <div>
-                <span className="font-bold text-white block">PostgreSQL Persistence</span>
-                <span className="text-gray-500">Prisma ACID Double-Entry Ledger</span>
+                <span className="font-bold text-white block">SQL ACID Persistence</span>
+                <span className="text-gray-500">Serializable Double-Entry Ledger</span>
               </div>
               <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold">
-                مطابق ومؤمّن
+                {metrics.systemStatus.database}
               </span>
             </div>
 
             <div className="p-3 rounded-xl bg-dark-950 border border-dark-800 flex items-center justify-between">
               <div>
-                <span className="font-bold text-white block">Vercel Serverless Hosting</span>
-                <span className="text-gray-500">Edge Network & Automated Deployments</span>
+                <span className="font-bold text-white block">Asset Storage &amp; Delivery</span>
+                <span className="text-gray-500">HMAC-SHA256 Signed Asset URLs</span>
               </div>
               <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold">
-                جاهز للإنتاج
+                {metrics.systemStatus.storage}
               </span>
             </div>
           </div>
@@ -346,4 +393,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

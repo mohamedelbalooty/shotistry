@@ -15,11 +15,12 @@ import {
 } from 'lucide-react';
 
 export default function PricingPage() {
-  const { country, setCountry, currency, addCredits, t } = useApp();
-  const [activePlan, setActivePlan] = useState<PlanTier>('PRO');
+  const { workspaceId, userId, country, setCountry, currency, refreshWorkspace, t } = useApp();
+  const [activePlan, setActivePlan] = useState<PlanTier>('FREE');
+  const [isProcessing, setIsProcessing] = useState(false);
   const [checkoutNotification, setCheckoutNotification] = useState<string | null>(null);
 
-  const handleSubscribe = (tier: PlanTier) => {
+  const handleSubscribe = async (tier: PlanTier) => {
     const plan = SUBSCRIPTION_PLANS[tier];
     if (tier === 'FREE') {
       setCheckoutNotification('أنت مشترك بالفعل في التجربة المجانية ولديك 5 رصيد.');
@@ -29,33 +30,84 @@ export default function PricingPage() {
     const price = country === 'SA' ? plan.priceSAR : plan.priceEGP;
     const formattedPrice = formatCurrency(price, currency);
 
-    // Simulated Paymob Checkout Activation
-    addCredits(plan.monthlyCredits);
-    setActivePlan(tier);
-    setCheckoutNotification(
-      `تمت معالجة اشتراكك بنجاح في باقة "${plan.nameAr}" بقيمة ${formattedPrice} عبر Paymob! تمت إضافة ${plan.monthlyCredits} رصيد لحسابك فوراً.`
-    );
+    setIsProcessing(true);
+    try {
+      const res = await fetch('/api/billing/checkout-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-workspace-id': workspaceId,
+          'x-user-id': userId,
+          'x-country': country,
+        },
+        body: JSON.stringify({
+          workspaceId,
+          kind: 'SUBSCRIPTION',
+          planTier: tier,
+          currency,
+          paymentMethod: country === 'SA' ? 'mada' : 'card',
+          sandboxSimulateWebhook: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'تعذر إنشاء طلب الدفع عبر Paymob');
+      }
 
-    setTimeout(() => {
-      setCheckoutNotification(null);
-    }, 6000);
+      await refreshWorkspace();
+      setActivePlan(tier);
+      setCheckoutNotification(
+        `تم توثيق اشتراكك في باقة "${plan.nameAr}" (${formattedPrice}) عبر Paymob Webhook الموقّع رقمياً (HMAC-SHA512) وإضافة ${plan.monthlyCredits} رصيد إلى دفتر الأستاذ!`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'فشل الاتصال ببوابة الدفع';
+      setCheckoutNotification(msg);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const handleBuyTopUp = (packId: string) => {
+  const handleBuyTopUp = async (packId: string) => {
     const pack = TOP_UP_PACKS.find((p) => p.id === packId);
     if (!pack) return;
 
     const price = country === 'SA' ? pack.priceSAR : pack.priceEGP;
     const formattedPrice = formatCurrency(price, currency);
 
-    addCredits(pack.credits);
-    setCheckoutNotification(
-      `تم شراء ${pack.nameAr} بقيمة ${formattedPrice} عبر Paymob بنجاح! تم شحن ${pack.credits} رصيد فوري غير منتهي الصلاحية إلى محفظتك.`
-    );
+    setIsProcessing(true);
+    try {
+      const res = await fetch('/api/billing/checkout-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-workspace-id': workspaceId,
+          'x-user-id': userId,
+          'x-country': country,
+        },
+        body: JSON.stringify({
+          workspaceId,
+          kind: 'TOP_UP',
+          packId: pack.id,
+          currency,
+          paymentMethod: country === 'SA' ? 'mada' : 'card',
+          sandboxSimulateWebhook: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'تعذر إنشاء طلب الشحن عبر Paymob');
+      }
 
-    setTimeout(() => {
-      setCheckoutNotification(null);
-    }, 6000);
+      await refreshWorkspace();
+      setCheckoutNotification(
+        `تم توثيق شراء ${pack.nameAr} (${formattedPrice}) عبر Paymob Webhook الموقّع وإضافة ${pack.credits} رصيد إلى دفتر الأستاذ!`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'فشل الاتصال ببوابة الدفع';
+      setCheckoutNotification(msg);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -64,14 +116,12 @@ export default function PricingPage() {
       <div className="text-center max-w-3xl mx-auto space-y-4">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-semibold">
           <CreditCard className="w-3.5 h-3.5" />
-          <span>بوابات دفع محلية معتمدة عبر Paymob</span>
+          <span>بوابات دفع محلية معتمدة عبر Paymob (توثيق HMAC-SHA512)</span>
         </div>
         <h1 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
           {t.pricingTitle}
         </h1>
-        <p className="text-gray-400 text-base sm:text-lg">
-          {t.pricingSubtitle}
-        </p>
+        <p className="text-gray-400 text-base sm:text-lg">{t.pricingSubtitle}</p>
 
         {/* Currency Switcher */}
         <div className="pt-4 flex items-center justify-center gap-3">
@@ -102,7 +152,7 @@ export default function PricingPage() {
       </div>
 
       {checkoutNotification && (
-        <div className="max-w-2xl mx-auto p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-3 animate-fade-in shadow-lg">
+        <div className="max-w-2xl mx-auto p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-3 shadow-lg">
           <ShieldCheck className="w-5 h-5 shrink-0 text-emerald-400" />
           <span>{checkoutNotification}</span>
         </div>
@@ -133,7 +183,9 @@ export default function PricingPage() {
               <div>
                 <div className="mb-4">
                   <h3 className="text-lg font-bold text-white">{plan.nameAr}</h3>
-                  <p className="text-xs text-gray-400 mt-1">{plan.monthlyCredits} رصيد تصوير شهرياً</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {plan.monthlyCredits} رصيد تصوير شهرياً
+                  </p>
                 </div>
 
                 <div className="mb-6 pb-6 border-b border-dark-800">
@@ -163,13 +215,14 @@ export default function PricingPage() {
 
               <button
                 onClick={() => handleSubscribe(tier)}
-                className={`w-full py-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 shadow ${
+                disabled={isProcessing}
+                className={`w-full py-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 shadow disabled:opacity-50 ${
                   isPro
                     ? 'bg-brand-500 hover:bg-brand-400 text-white shadow-brand-500/20'
                     : 'bg-dark-800 hover:bg-dark-700 text-gray-200 border border-dark-700'
                 }`}
               >
-                {tier === 'FREE' ? (
+                {tier === activePlan ? (
                   <span>باقتك الحالية</span>
                 ) : (
                   <>
@@ -213,13 +266,15 @@ export default function PricingPage() {
                     {formatCurrency(price, currency)}
                   </p>
                   <p className="text-xs text-gray-500">
-                    تكلفة الصورة: ~{(price / pack.credits).toFixed(2)} {currency === 'SAR' ? 'ر.س' : 'ج.م'}
+                    تكلفة الصورة: ~{(price / pack.credits).toFixed(2)}{' '}
+                    {currency === 'SAR' ? 'ر.س' : 'ج.م'}
                   </p>
                 </div>
 
                 <button
                   onClick={() => handleBuyTopUp(pack.id)}
-                  className="w-full py-2.5 rounded-xl bg-dark-800 hover:bg-brand-500 hover:text-white text-gray-200 font-bold text-xs border border-dark-700 transition-all flex items-center justify-center gap-1.5"
+                  disabled={isProcessing}
+                  className="w-full py-2.5 rounded-xl bg-dark-800 hover:bg-brand-500 hover:text-white text-gray-200 font-bold text-xs border border-dark-700 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   <ShoppingBag className="w-3.5 h-3.5" />
                   <span>{t.buyPack}</span>
@@ -246,7 +301,8 @@ export default function PricingPage() {
               <span>ما هي طرق الدفع المتاحة في السعودية ومصر؟</span>
             </h4>
             <p className="leading-relaxed">
-              في السعودية: بطاقات مدى (Mada)، أبل باي (Apple Pay)، فيزا وماستركارد.<br />
+              في السعودية: بطاقات مدى (Mada)، أبل باي (Apple Pay)، فيزا وماستركارد.
+              <br />
               في مصر: بطاقات ميزة (Meeza)، فيزا، ماستركارد، ومحافظ الهاتف المحمولة (فودافون كاش، إنستاباي).
             </p>
           </div>
@@ -267,7 +323,7 @@ export default function PricingPage() {
               <span>هل الرصيد الشهري يتراكم؟</span>
             </h4>
             <p className="leading-relaxed">
-              الرصيد الأساسي للاشتراك الشهري يُجدد كل 30 يوماً، بينما رصيد "باقات الشحن الإضافية" يبقى صالحاً في محفظتك مدى الحياة ولا ينتهي أبداً.
+              الرصيد الأساسي للاشتراك الشهري يُجدد كل 30 يوماً، بينما رصيد &quot;باقات الشحن الإضافية&quot; يبقى صالحاً في محفظتك مدى الحياة ولا ينتهي أبداً.
             </p>
           </div>
 
@@ -285,4 +341,3 @@ export default function PricingPage() {
     </div>
   );
 }
-

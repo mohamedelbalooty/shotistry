@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
-import assert from 'node:assert';
-import { PromptSynthesizer } from '../src/lib/ai/prompt-synthesizer.ts';
+import assert from 'node:assert/strict';
+import {
+  PromptSynthesizer,
+  DEFAULT_GEMINI_IMAGE_MODEL,
+  normalizeGeminiImageModel,
+} from '../src/lib/ai/prompt-synthesizer.ts';
 import { REGIONAL_PHOTOSHOOT_PRESETS, getPresetById } from '../src/lib/ai/presets.ts';
 
 describe('Commercial Prompt Synthesizer Tests', () => {
@@ -12,14 +16,14 @@ describe('Commercial Prompt Synthesizer Tests', () => {
     assert.ok(gulfLuxury.nameAr.includes('الفخامة الخليجية'));
   });
 
-  it('should synthesize full 10-component prompt for Gulf Luxury Perfume Shoot', () => {
+  it('should synthesize full 10-component prompt for Gulf Luxury Perfume Shoot with active default model gemini-nano-banana-2.1', () => {
     const result = PromptSynthesizer.synthesize({
       productTitle: 'Royal Oud Parfum',
       productCategory: 'Fragrances',
       presetId: 'gulf_luxury_marble',
       aspectRatio: '1:1',
       brandName: 'Al-Majed',
-      brandAesthetic: 'Luxury Heritage'
+      brandAesthetic: 'Luxury Heritage',
     });
 
     assert.ok(result.fullPrompt.includes('Hero commercial studio photography of Royal Oud Parfum'));
@@ -28,8 +32,21 @@ describe('Commercial Prompt Synthesizer Tests', () => {
     assert.ok(result.fullPrompt.includes('Lighting:'));
     assert.ok(result.fullPrompt.includes('Optics & Framing:'));
     assert.ok(result.fullPrompt.includes('Physics & Grounding:'));
+    assert.ok(result.fullPrompt.includes('Preserve 100% original product geometry'));
     assert.strictEqual(result.aspectRatio, '1:1');
-    assert.strictEqual(result.targetModel, 'imagen-3.0-generate-002');
+    assert.strictEqual(result.targetModel, 'gemini-nano-banana-2.1');
+    assert.strictEqual(DEFAULT_GEMINI_IMAGE_MODEL, 'gemini-nano-banana-2.1');
+  });
+
+  it('should normalize shut-down Imagen 3/4 and deprecated Flash Image IDs to gemini-nano-banana-2.1', () => {
+    assert.strictEqual(normalizeGeminiImageModel('imagen-3.0-generate-002'), 'gemini-nano-banana-2.1');
+    assert.strictEqual(normalizeGeminiImageModel('imagen-4.0-generate-001'), 'gemini-nano-banana-2.1');
+    assert.strictEqual(normalizeGeminiImageModel('gemini-2.5-flash-image'), 'gemini-nano-banana-2.1');
+    assert.strictEqual(normalizeGeminiImageModel('gemini-3-pro-image'), 'gemini-3-pro-image');
+    assert.strictEqual(
+      normalizeGeminiImageModel('gemini-3.1-flash-lite-image'),
+      'gemini-3.1-flash-lite-image'
+    );
   });
 
   it('should generate robust negative prompts preventing distortion and watermarks', () => {
@@ -37,7 +54,7 @@ describe('Commercial Prompt Synthesizer Tests', () => {
       productTitle: 'Leather Handbag',
       productCategory: 'Apparel',
       presetId: 'minimalist_concrete_studio',
-      aspectRatio: '4:5'
+      aspectRatio: '4:5',
     });
 
     assert.ok(result.negativePrompt.includes('no warped product geometry'));
@@ -52,10 +69,14 @@ describe('Commercial Prompt Synthesizer Tests', () => {
       productCategory: 'Cosmetics',
       presetId: 'botanical_spa_splash',
       aspectRatio: '9:16',
-      customDirectives: 'warm golden sunbeam coming from top-left'
+      customDirectives: 'warm golden sunbeam coming from top-left',
     });
 
-    assert.ok(result.fullPrompt.includes('Additional creative styling: warm golden sunbeam coming from top-left.'));
+    assert.ok(
+      result.fullPrompt.includes(
+        'Additional creative styling: warm golden sunbeam coming from top-left.'
+      )
+    );
     assert.strictEqual(result.aspectRatio, '9:16');
   });
 
@@ -64,11 +85,10 @@ describe('Commercial Prompt Synthesizer Tests', () => {
       productTitle: 'Sneakers',
       productCategory: 'Footwear',
       presetId: 'non_existent_preset_id',
-      aspectRatio: '1:1'
+      aspectRatio: '1:1',
     });
 
     assert.ok(result.fullPrompt.length > 50);
     assert.ok(result.fullPrompt.includes('Hero commercial studio photography of Sneakers'));
   });
 });
-

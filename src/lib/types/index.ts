@@ -1,5 +1,7 @@
 export type Country = 'EG' | 'SA';
+export type CountryCode = Country;
 export type Currency = 'EGP' | 'SAR' | 'USD';
+export type CurrencyCode = Currency;
 export type Locale = 'ar' | 'en';
 
 export type PlanTier = 'FREE' | 'STARTER' | 'PRO' | 'AGENCY';
@@ -21,6 +23,7 @@ export type JobStatus =
 export type ReservationStatus = 'PENDING' | 'SETTLED' | 'RELEASED';
 
 export type LedgerTransactionType =
+  | 'TRIAL_GRANT'
   | 'SUBSCRIPTION_GRANT'
   | 'TOP_UP_PURCHASE'
   | 'JOB_SETTLEMENT'
@@ -28,6 +31,13 @@ export type LedgerTransactionType =
   | 'ADMIN_ADJUSTMENT';
 
 export type AspectRatio = '1:1' | '4:5' | '9:16' | '16:9';
+
+export type GeminiImageModelId =
+  | 'gemini-nano-banana-2.1'
+  | 'gemini-3-pro-image'
+  | 'gemini-3.1-flash-lite-image';
+
+export type ExecutionMode = 'LIVE_GEMINI_API' | 'LOCAL_COMPOSITE_SANDBOX';
 
 export interface PlanConfig {
   tier: PlanTier;
@@ -92,13 +102,24 @@ export interface GenerationRequest {
 
 export interface GenerationResult {
   jobId: string;
+  photoshootId?: string;
+  status?: 'COMPLETED' | 'FAILED';
   imageUrl: string;
   thumbnailUrl: string;
+  maskImageUrl?: string;
+  isolatedProductUrl?: string;
   aspectRatio: AspectRatio;
   resolution: string;
   modelUsed: string;
+  executionMode: ExecutionMode;
   synthesizedPrompt: string;
+  negativePrompt?: string;
   synthIdDetected: boolean;
+  fidelityScore: number;
+  fidelityVerified: boolean;
+  creditsCharged?: number;
+  remainingCredits?: number;
   completedAt: string;
 }
 
+export type PhotoshootGenerationResult = GenerationResult;

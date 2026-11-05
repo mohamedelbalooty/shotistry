@@ -7,7 +7,7 @@
 ---
 
 ## 1. Context & Problem Statement
-Image generation via Google GenAI (`imagen-3.0-generate-002`) typically requires 4 to 8 seconds. Under Vercel serverless functions, synchronous HTTP connections:
+Image generation via Google GenAI (`gemini-nano-banana-2.1` / `gemini-3-pro-image` via `ai.interactions.create`) typically requires 3 to 7 seconds. Under Vercel serverless functions, synchronous HTTP connections:
 1. Risk timeout errors on slow connections.
 2. Degrade client user experience.
 3. Waste serverless execution billable wall-clock time waiting on external I/O.
