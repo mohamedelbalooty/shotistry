@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] - 2026-11-08 (Final Financial Accuracy & Genuine Final-Image Fidelity Verification)
+### Added
+- **Centralized Model-Specific Cost Configuration (`src/lib/pricing/model-costs.ts`, `tests/pricing.test.mjs`):**
+  - Added `MODEL_PRICING_CATALOG`, `calculateModelGenerationCost`, `getAllModelResolutionCosts`, `calculatePlanProfitability`, `getAllPlansProfitabilityMatrix`, `getCreditWeightForGeneration`, and `validatePlanModelEntitlement` covering `gemini-3.1-flash-image` (`512`, `1K`, `2K`, `4K`), `gemini-3.1-flash-lite-image` (`1K`), and `gemini-3-pro-image` (`1K`, `2K`, `4K`) across `standard`, `batch`, `flex` (Vertex AI only), and `priority` (Vertex AI only) tiers.
+  - Explicitly computes all 6 cost components per image (input image cost, text input cost, generated image output cost, Cloudflare R2 storage & CDN delivery `$0.0005`, `3%` retry allowance, and actual cost per successful image).
+- **Delivered-Asset Fidelity Verification & Foreground Lock Scene Compositing (`src/lib/ai/image-processor.ts`, `src/lib/ai/gemini-client.ts`, `src/app/studio/page.tsx`):**
+  - Added `verifyDeliveredImageFidelity` to decode and verify pixel preservation directly on the actual final delivered `imageUrl` (`fidelityScore`, `exactPixelMatchRatio`, `meanChannelError`, `fidelityVerified`).
+  - Added `compositeProductOnSceneImage` and `lockProductForeground` option allowing Gemini-generated studio scenes to receive bit-exact original isolated product foreground compositing.
+
+### Changed & Fixed
+- **Strict Separation of Flash vs Flash Lite COGS (`src/lib/pricing/plans.ts`, `src/app/api/admin/metrics/route.ts`, `src/app/api/billing/plans/route.ts`, `src/app/api/photoshoots/generate/route.ts`):**
+  - Fixed AI COGS calculation (`gemini-3.1-flash-image` 1K Standard = `$0.0672` output / **`$0.071050`** actual cost = `3.5525 EGP` / `0.2664 SAR`, no longer conflated with Lite's `$0.0336` output rate), fixed `GeneratedImage."generationJobId"` SQL join in `/api/admin/metrics`, and added explicit plan model/resolution entitlements (`403` enforcement) and credit weights (`1`/`2`/`3`/`4` credits).
+- **Difficult Product Category Isolation & Truthful Fidelity UI (`src/lib/ai/image-processor.ts`, `src/lib/i18n/translations.ts`, `src/app/page.tsx`, `src/app/studio/page.tsx`):**
+  - Upgraded `isolateProductForeground` with adaptive contrast thresholds, contour gap closing, and 4-connected exterior border BFS flood-fill so interior white packaging logos, white-on-white ceramics, transparent glass bottles, reflective chrome highlights, and 2px atomizer edges are preserved without interior holes.
+  - Eliminated misleading live fidelity scoring on intermediate local composites when returning a different Gemini output; removed unverified `100%` static fidelity copy and wired dynamic fidelity badges in Studio UI.
+- **Financial, AI & QA Documentation (`docs/ai/*`, `docs/business/*`, `docs/audit/*`, `docs/qa/*`, `docs/research/*`, `project-status.md`):**
+  - Synchronized all model pricing tables, Egypt/Saudi plan profitability calculations (`100%` worst-case and `65%` expected utilization), FX sensitivity (`50.0` -> `62.50 EGP`), Egypt `pack_500` Batch mitigation, and full test evidence (`73` verified passing, `2` external `BLOCKED`).
+
 ## [0.2.1] - 2026-11-05 (Final Critical Blocker Remediation & PostgreSQL Gate)
 ### Changed & Fixed
 - **Official Gemini API Model Identifiers (`src/lib/ai/prompt-synthesizer.ts`, `src/lib/ai/gemini-client.ts`, `prisma/schema.prisma`):**

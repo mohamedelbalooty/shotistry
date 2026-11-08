@@ -1,39 +1,34 @@
-# Shotistry — Independent Production-Readiness Audit & Final Remediation Report
+# Shotistry — Independent Production-Readiness Audit & Final Verification Report
 
 - **Repository:** `https://github.com/mohamedelbalooty/shotistry`
 - **Original Baseline Commit (`main`):** `95fb12ab6d9a16277a93df14db1eba03b860c968` (Untouched / preserved)
-- **Active Audit & Remediation Branch:** `audit/production-readiness`
-- **Audit Date:** November 5, 2026
+- **Active Audit & Remediation Branch:** `audit/production-readiness` (isolated; do not merge into `main`)
+- **Latest Verification Date:** November 2026
 
 ---
 
 ## 1. Executive Summary & Final Release Decision
 
-An independent production-readiness audit of Shotistry (`95fb12a`) and a follow-up critical blocker remediation were conducted on branch `audit/production-readiness`.
+An independent production-readiness audit of Shotistry (`95fb12a`), follow-up critical blocker remediation (`92ee592`), and final focused verification of **Model-Specific Unit Economics** and **Genuine Final-Image Product Fidelity** were completed on branch `audit/production-readiness`.
 
-### Summary of Resolved Critical Findings
+### Summary of Verified Findings & Controls
 1. **Official Gemini Model Identifiers (`PASS` — `UNIT TESTED` + `CONTRACT TESTED`):**
-   - Replaced the product marketing alias `gemini-nano-banana-2.1` and shut-down Imagen 3/4 identifiers across all API requests, defaults, and database schemas with the official Google Gemini Interactions API model identifiers:
-     - **`gemini-3.1-flash-image`** (Default commercial studio engine)
-     - **`gemini-3.1-flash-lite-image`** (Ultra-fast 1K preview engine)
-     - **`gemini-3-pro-image`** (4K studio reasoning pro engine)
-   - `normalizeGeminiImageModel()` normalizes any legacy or marketing alias (`gemini-nano-banana-2.1`, `imagen-3.0-generate-002`, `imagen-4.0-generate-001`, `gemini-2.5-flash-image`) to `gemini-3.1-flash-image`.
+   - Official Google Gemini Interactions API (`ai.interactions.create`) model IDs enforced everywhere: **`gemini-3.1-flash-image`** (default studio engine), **`gemini-3.1-flash-lite-image`** (fast 1K preview engine), and **`gemini-3-pro-image`** (4K Pro studio engine).
+   - `normalizeGeminiImageModel()` normalizes marketing aliases (`gemini-nano-banana-2.1`) and retired Imagen/legacy Flash IDs to `gemini-3.1-flash-image`.
 2. **Official Google Gemini Interactions API Schema (`PASS` — `CONTRACT TESTED (MOCKED)`):**
-   - Updated `GeminiClient.generateProductPhoto` (`src/lib/ai/gemini-client.ts`) to match the exact official Google Interactions API (`ai.interactions.create`) request and response schema:
-     - Sends `input: [{ type: 'text', text }, { type: 'image', mime_type, data }, { type: 'image', mime_type, data }]`.
-     - Sends `response_format: { type: 'image', mime_type, aspect_ratio, image_size }` (removing deprecated `response_modalities` and `generation_config.image_config`).
-     - Enforces uppercase `image_size` (`512`, `1K`, `2K`, `4K`) and clamps `gemini-3.1-flash-lite-image` to `'1K'`.
-     - Extracts output image bytes from `interaction.output_image.data` (with fallback to `interaction.steps` `model_output` content blocks) and returns token usage metadata from `interaction.usage`.
-3. **Real PNG, JPEG, and WebP Image Decoding & Pixel Processing (`PASS` — `UNIT TESTED` + `INTEGRATION TESTED`):**
-   - Removed the synthetic SHA-256 hash rasterizer from `src/lib/ai/image-processor.ts`.
-   - Implemented `decodeProductImage()` using **`sharp` (`0.35.5` / `libvips 8.18.7`)** to decode real `PNG`, `JPEG`, and `WebP` product images into 8-bit RGBA pixels with phone-camera EXIF orientation normalization (`.rotate()`).
-   - Added real binary image fixtures in `tests/fixtures/` (`product-ruby.png`, `product-ruby.jpg`, `product-ruby.webp`, `product-cobalt.jpg`, `product-cobalt.webp`) and verified pixel-color preservation (`fidelityScore >= 0.95`) and clear rejection of unsupported/corrupt formats (`PDF`, `GIF`, `HEIC`, truncated JPEG).
-4. **Real PostgreSQL Migration & Concurrency Validation (`PASS` — `INTEGRATION TESTED (POSTGRESQL)`):**
-   - Implemented `PostgresCreditLedgerService` (`src/lib/ledger/postgres-ledger-service.ts`) using `@prisma/client` with `Prisma.TransactionIsolationLevel.Serializable` + `SELECT "id" FROM "Workspace" WHERE "id" = $1 FOR UPDATE` row-level pessimistic locking and automatic retry on SQLSTATE `40001` (`P2034`).
-   - Provisioned an isolated PostgreSQL test database (`shotistry_audit_test`), applied `prisma/migrations/20261105000000_init/migration.sql` (17 tables, 7 enums), and executed `tests/postgres-ledger.test.mjs` verifying workspace provisioning, reservation, settlement, release, and 5-way concurrent double-spend prevention against real PostgreSQL.
-5. **Fail-Closed Paymob Webhook & Real SQL Admin Metrics (`PASS` — `INTEGRATION TESTED`):**
-   - `/api/webhooks/paymob` fails closed when `PAYMOB_HMAC_SECRET` is absent (`503`) or invalid (`401`), persists `WebhookEvent` rows, enforces idempotency, updates `Subscription`, and grants credits atomically.
-   - `/api/admin/metrics` computes all metrics from real database tables with zero hardcoded demo numbers.
+   - Sends `input` text/image blocks and `response_format: { type: 'image', mime_type, aspect_ratio, image_size }` with uppercase `512`/`1K`/`2K`/`4K`, clamping `gemini-3.1-flash-lite-image` to `'1K'`, and parses `interaction.output_image.data`, `steps[].content[]`, and `interaction.usage`.
+3. **Centralized Model-Specific Unit Economics & Plan Profitability (`PASS` — `UNIT TESTED` + `INTEGRATION TESTED`):**
+   - Created `src/lib/pricing/model-costs.ts` as the single source of truth across `gemini-3.1-flash-image` (`512`/`1K`/`2K`/`4K`), `gemini-3.1-flash-lite-image` (`1K`), and `gemini-3-pro-image` (`1K`/`2K`/`4K`), separating `standard`, `batch`, `flex` (Vertex AI only), and `priority` (Vertex AI only) rates.
+   - Separated Standard `gemini-3.1-flash-image` 1K (`$0.0672` output / **`$0.071050`** total actual cost = `3.5525 EGP` / `0.2664 SAR`) from Lite's `$0.0336` output (`$0.035775` total) across `/api/admin/metrics`, `/api/billing/plans`, and all financial docs.
+   - Mapped every subscription plan (`FREE`, `STARTER`, `PRO`, `AGENCY`) in `src/lib/pricing/plans.ts` to explicit `defaultModel`, `defaultImageSize`, `maxImageSize`, and `allowedModels`, enforced `403` plan gating and credit weighting (`1`/`2`/`3`/`4` credits) in `/api/photoshoots/generate`, and recalculated Egypt & Saudi worst-case (`100%`) and expected (`65%`) gross margins.
+   - **Commercial Risk Finding Surface:** Because Egypt Standard Flash 1K COGS is `3.5525 EGP/img`, Egypt `AGENCY` (`1,899 EGP`, 500 cr) has a thin `3.6%` worst-case interactive margin (`36.3%` expected; `50.0%` worst / `66.5%` expected via Batch API), and Egypt `pack_500` (`1,499 EGP` = `3.00 EGP/cr`) would run `-21.4%` interactively unless Batch-routed (`37.4%`) or repriced (`>= 2,199 EGP`).
+4. **Genuine Final-Image Product Fidelity & Difficult Categories (`PASS` — `UNIT TESTED` + `INTEGRATION TESTED`):**
+   - Replaced global threshold isolation with adaptive contrast (`26` standard, down to `7` on white-on-white), contour gap closing, and 4-connected exterior border BFS flood-fill in `src/lib/ai/image-processor.ts`.
+   - `verifyDeliveredImageFidelity` decodes the **actual final image delivered (`result.imageUrl`)** using `sharp` (`libvips` + EXIF `.rotate()`).
+   - Verified in `tests/image-pipeline.test.mjs` and `tests/gemini-client.test.mjs` across all 6 difficult product categories (pixel preservation, interior white logos/packaging, white ceramic on white backdrop, clear refractive glass, mirror-bright chrome speculars, 2px fine edges) plus live-mode low-fidelity detection and `lockProductForeground` scene compositing (`compositeProductOnSceneImage`).
+   - Removed unverified static `100%` fidelity claims from marketing copy (`src/app/page.tsx`) and made Studio fidelity badges dynamic (`activeResult.fidelityVerified`).
+5. **PostgreSQL ACID Concurrency & Fail-Closed Billing (`PASS` — `INTEGRATION TESTED (POSTGRESQL)`):**
+   - `PostgresCreditLedgerService` (`SERIALIZABLE` + `SELECT ... FOR UPDATE`) verified against 17 PostgreSQL tables and 7 enums (`shotistry_audit_test`) including 5-way concurrent double-spend prevention; Paymob webhook (`tests/paymob-webhook.test.mjs`) fails closed (`503`/`401`) and enforces idempotency.
 
 ---
 
@@ -41,13 +36,13 @@ An independent production-readiness audit of Shotistry (`95fb12a`) and a follow-
 
 | Verification Category | Status | Suites / Files | Notes |
 |---|---|---|---|
-| **UNIT TESTED** | **PASS** | `tests/prompt-synthesizer.test.mjs`, `tests/paymob-hmac.test.mjs`, `tests/ledger.test.mjs` | Pure domain & cryptographic logic verified. |
-| **CONTRACT TESTED (MOCKED)** | **PASS** | `tests/gemini-client.test.mjs` | Verifies official Interactions API request/response schema (`response_format`, `output_image.data`, `steps`, `usage`, error handling) against documented fixtures. **Not a live API claim.** |
-| **INTEGRATION TESTED (SHARP + SQL)** | **PASS** | `tests/image-pipeline.test.mjs`, `tests/db-ledger.test.mjs`, `tests/webhook-paymob.test.mjs`, `tests/api-photoshoots.test.mjs`, `tests/admin-metrics.test.mjs`, `tests/asset-storage.test.mjs` | Real Sharp PNG/JPEG/WebP pixel decoding, foreground matting, studio compositing, webhook persistence, and API route integration. |
-| **INTEGRATION TESTED (POSTGRESQL)** | **PASS** | `tests/postgres-ledger.test.mjs` | Real PostgreSQL 17-table migration (`shotistry_audit_test`) + `SERIALIZABLE` / `SELECT FOR UPDATE` concurrency verification. |
+| **UNIT TESTED** | **PASS** | `tests/pricing.test.mjs`, `tests/prompt-synthesizer.test.mjs`, `tests/paymob.test.mjs`, `tests/ledger.test.mjs` | Model-specific 6-component costs, EG/SA plan margins, credit weights, prompt normalization, HMAC vector, ledger invariants. |
+| **CONTRACT TESTED (MOCKED)** | **PASS** | `tests/gemini-client.test.mjs` | Official Interactions API schema + invariant that `fidelityScore` measures only the actual delivered `imageUrl` (plus `lockProductForeground` compositing). |
+| **INTEGRATION TESTED (SHARP + SQL)** | **PASS** | `tests/image-pipeline.test.mjs`, `tests/db-ledger.test.mjs`, `tests/paymob-webhook.test.mjs`, `tests/api-photoshoots.test.mjs`, `tests/admin-metrics.test.mjs` | Real Sharp PNG/JPEG/WebP decoding across all 6 difficult product categories, plan model/4K `403` gating, weighted credit deductions, SQL COGS calculations, signed URLs. |
+| **INTEGRATION TESTED (POSTGRESQL)** | **PASS** | `tests/postgres-ledger.test.mjs` | Real PostgreSQL 17-table migration (`shotistry_audit_test`) + `SERIALIZABLE` / `SELECT FOR UPDATE` concurrency verification (`REQUIRE_POSTGRES_TESTS=1`). |
 | **END-TO-END TESTED** | **PASS** | `tests/e2e-workflow.test.mjs` | Full merchant journey: session -> upload -> generation -> job poll -> signed download -> Paymob webhook -> admin metrics. |
-| **LIVE API TESTED (Gemini / Paymob / R2)** | **BLOCKED / NOT TESTED** | `tests/live-external-smoke.test.mjs` | **BLOCKED:** Live `GEMINI_API_KEY`, `PAYMOB_SECRET_KEY`/`PAYMOB_API_KEY`, and `R2_*` credentials are not provisioned in the local audit environment. |
+| **LIVE API TESTED (Gemini / Paymob / R2)** | **BLOCKED** | `tests/live-external-smoke.test.mjs` | **BLOCKED:** Live `GEMINI_API_KEY`, `PAYMOB_SECRET_KEY`/`PAYMOB_API_KEY`, and `R2_*` credentials are not provisioned in this environment. |
 
 ### Final Release Verdict
-- **Branch `audit/production-readiness` Engineering & Database Gate:** **PASS**
-- **Production Merge / Live Deployment Gate:** **BLOCKED** pending external staging credentials (`GEMINI_API_KEY`, `PAYMOB_*`, `R2_*`) to execute `tests/live-external-smoke.test.mjs` (`LIVE API TESTED`). Do not merge into `main` or deploy to production until live credential smoke tests pass.
+- **Branch `audit/production-readiness` Code, Unit Economics, Product Fidelity & PostgreSQL Gate:** **PASS**
+- **Staging / Production Deployment Gate:** **BLOCKED** pending external credentials (`GEMINI_API_KEY`, `PAYMOB_*`, `R2_*`) to run `tests/live-external-smoke.test.mjs` (`LIVE API TESTED`) and commercial pricing sign-off on Egypt `pack_500` Batch routing. Do not merge into `main` or deploy to production.

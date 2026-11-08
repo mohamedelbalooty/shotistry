@@ -83,7 +83,7 @@ export default function HomePage() {
               </div>
               <div className="absolute bottom-3 end-3 px-2.5 py-1 rounded bg-dark-950/90 text-emerald-400 text-xs font-medium border border-emerald-500/20 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                دقة 100% للشعار والعبوة
+                حماية الشعار والعبوة مع فحص التطابق الفعلي
               </div>
             </div>
           </div>

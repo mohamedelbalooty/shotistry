@@ -16,7 +16,8 @@ import {
   parseImageInput,
   isolateProductForeground,
   compositeProductOnStudioScene,
-  verifyProductFidelity,
+  compositeProductOnSceneImage,
+  verifyDeliveredImageFidelity,
   getResolutionForAspectRatio,
 } from './image-processor.ts';
 
@@ -30,6 +31,7 @@ export interface GenerateImageOptions {
   presetId?: string;
   referenceImageBase64?: string;
   maskImageBase64?: string;
+  lockProductForeground?: boolean;
 }
 
 export interface InteractionsCreateRequest {
@@ -157,20 +159,13 @@ export class GeminiClient {
       options.outputMimeType === 'image/jpeg' || options.outputMimeType === 'image/webp'
         ? options.outputMimeType
         : 'image/png';
-    const { resolution } = getResolutionForAspectRatio(options.aspectRatio);
+    const { resolution } = getResolutionForAspectRatio(
+      options.aspectRatio,
+      effectiveImageSize
+    );
 
     // Stage 1 & 2: Decode customer product image (PNG, JPEG, or WebP), isolate foreground & extract binary alpha mask
     const isolated = await isolateProductForeground(options.referenceImageBase64);
-
-    // Stage 3: Prepare pixel-accurate studio composite preserving 100% of customer product foreground
-    const studioComposite = compositeProductOnStudioScene({
-      isolated,
-      presetId: options.presetId ?? 'gulf_luxury_marble',
-      aspectRatio: options.aspectRatio,
-    });
-
-    // Stage 4: Verify foreground pixel fidelity
-    const fidelityReport = verifyProductFidelity(isolated, studioComposite);
     const completedAt = new Date().toISOString();
 
     if (this.client && this.isLiveConfigured) {
@@ -246,6 +241,27 @@ export class GeminiClient {
       const finalMimeType = extractedMimeType || outputMimeType;
       const liveDataUrl = `data:${finalMimeType};base64,${extractedBase64}`;
 
+      let finalDeliveredImageUrl = liveDataUrl;
+      let finalPlacement: ReturnType<typeof compositeProductOnStudioScene>['placement'] | undefined;
+
+      if (options.lockProductForeground) {
+        const lockedComposite = await compositeProductOnSceneImage({
+          isolated,
+          sceneImageDataUrl: liveDataUrl,
+          aspectRatio: options.aspectRatio,
+          presetId: options.presetId,
+        });
+        finalDeliveredImageUrl = lockedComposite.imageDataUrl;
+        finalPlacement = lockedComposite.placement;
+      }
+
+      // Measure fidelity directly on the actual final image delivered to the customer
+      const deliveredFidelity = await verifyDeliveredImageFidelity(
+        isolated,
+        finalDeliveredImageUrl,
+        finalPlacement
+      );
+
       const usageMetadata: GeminiUsageMetadata | undefined = interaction.usage
         ? {
             inputTokens: interaction.usage.total_input_tokens ?? 0,
@@ -265,8 +281,8 @@ export class GeminiClient {
         jobId,
         interactionId: interaction.id,
         status: 'COMPLETED',
-        imageUrl: liveDataUrl,
-        thumbnailUrl: liveDataUrl,
+        imageUrl: finalDeliveredImageUrl,
+        thumbnailUrl: finalDeliveredImageUrl,
         maskImageUrl: isolated.maskDataUrl,
         isolatedProductUrl: isolated.isolatedProductDataUrl,
         synthesizedPrompt: options.prompt,
@@ -278,11 +294,25 @@ export class GeminiClient {
         usageMetadata,
         creditsCharged: 1,
         synthIdDetected: true,
-        fidelityScore: fidelityReport.fidelityScore,
-        fidelityVerified: fidelityReport.fidelityVerified,
+        fidelityScore: deliveredFidelity.fidelityScore,
+        fidelityVerified: deliveredFidelity.fidelityVerified,
         completedAt,
       };
     }
+
+    // Stage 3: Prepare pixel-accurate studio composite preserving 100% of customer product foreground
+    const studioComposite = compositeProductOnStudioScene({
+      isolated,
+      presetId: options.presetId ?? 'gulf_luxury_marble',
+      aspectRatio: options.aspectRatio,
+    });
+
+    // Stage 4: Verify foreground pixel fidelity directly on the actual delivered imageUrl
+    const deliveredFidelity = await verifyDeliveredImageFidelity(
+      isolated,
+      studioComposite.imageDataUrl,
+      studioComposite.placement
+    );
 
     // Local Composite Sandbox Mode (when GEMINI_API_KEY is not configured):
     // Returns the real pixel-composited studio image containing the customer's actual product,
@@ -304,8 +334,8 @@ export class GeminiClient {
         : ('LOCAL_COMPOSITE_SANDBOX' as ExecutionMode),
       creditsCharged: 1,
       synthIdDetected: false,
-      fidelityScore: fidelityReport.fidelityScore,
-      fidelityVerified: fidelityReport.fidelityVerified,
+      fidelityScore: deliveredFidelity.fidelityScore,
+      fidelityVerified: deliveredFidelity.fidelityVerified,
       completedAt,
     };
   }

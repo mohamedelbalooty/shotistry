@@ -1,7 +1,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { GeminiClient } from '../src/lib/ai/gemini-client.ts';
-import { createSampleProductPngDataUrl } from '../src/lib/ai/image-processor.ts';
+import {
+  createSampleProductPngDataUrl,
+  isolateProductForeground,
+  verifyDeliveredImageFidelity,
+} from '../src/lib/ai/image-processor.ts';
 
 describe('GeminiClient Engine & Official Interactions API Contract Tests', () => {
   const sampleProductImage = createSampleProductPngDataUrl({
@@ -272,5 +276,114 @@ describe('GeminiClient Engine & Official Interactions API Contract Tests', () =>
       },
       /Gemini Interactions API returned no image output/
     );
+  });
+
+  test('FIDELITY INVARIANT: displayed fidelityScore measures the actual final image delivered to the customer, never an intermediate local composite', async () => {
+    const rubyProduct = createSampleProductPngDataUrl({
+      width: 64,
+      height: 64,
+      backgroundColor: [255, 255, 255],
+      productColor: [185, 20, 40],
+      labelColor: [245, 210, 90],
+    });
+    const alteredBlueOutput = createSampleProductPngDataUrl({
+      width: 180,
+      height: 180,
+      backgroundColor: [30, 30, 35],
+      productColor: [15, 55, 215],
+      labelColor: [180, 220, 255],
+    });
+    const alteredBase64 = alteredBlueOutput.replace(/^data:image\/png;base64,/, '');
+
+    const mockInteractionsClient = {
+      interactions: {
+        create: async (req) => ({
+          id: 'inter_fidelity_raw_005',
+          model: req.model,
+          status: 'completed',
+          output_image: {
+            type: 'image',
+            mime_type: 'image/png',
+            data: alteredBase64,
+          },
+        }),
+      },
+    };
+
+    const client = new GeminiClient('AIzaSyContractTestKey999999', mockInteractionsClient);
+    const result = await client.generateProductPhoto('job-fidelity-raw', {
+      prompt: 'Ruby perfume bottle on dark marble',
+      negativePrompt: 'warped label',
+      aspectRatio: '1:1',
+      model: 'gemini-3.1-flash-image',
+      referenceImageBase64: rubyProduct,
+      lockProductForeground: false,
+    });
+
+    assert.equal(result.executionMode, 'LIVE_GEMINI_API');
+    assert.equal(result.imageUrl, alteredBlueOutput);
+    assert.ok(
+      result.fidelityScore < 0.5,
+      `Expected fidelityScore on altered live output to be < 0.5 (measured on actual delivered image), got ${result.fidelityScore}`
+    );
+    assert.equal(
+      result.fidelityVerified,
+      false,
+      'Must not claim fidelityVerified=true when the delivered Gemini image altered the product pixels'
+    );
+  });
+
+  test('FIDELITY INVARIANT: lockProductForeground composites exact isolated product foreground onto the Gemini-generated scene and proves fidelity on the delivered asset', async () => {
+    const rubyProduct = createSampleProductPngDataUrl({
+      width: 64,
+      height: 64,
+      backgroundColor: [255, 255, 255],
+      productColor: [185, 20, 40],
+      labelColor: [245, 210, 90],
+    });
+    const geminiGeneratedScene = createSampleProductPngDataUrl({
+      width: 180,
+      height: 180,
+      backgroundColor: [28, 24, 22],
+      productColor: [20, 60, 200],
+      labelColor: [200, 200, 220],
+    });
+    const sceneBase64 = geminiGeneratedScene.replace(/^data:image\/png;base64,/, '');
+
+    const mockInteractionsClient = {
+      interactions: {
+        create: async (req) => ({
+          id: 'inter_fidelity_locked_006',
+          model: req.model,
+          status: 'completed',
+          output_image: {
+            type: 'image',
+            mime_type: 'image/png',
+            data: sceneBase64,
+          },
+        }),
+      },
+    };
+
+    const client = new GeminiClient('AIzaSyContractTestKey999999', mockInteractionsClient);
+    const result = await client.generateProductPhoto('job-fidelity-locked', {
+      prompt: 'Ruby perfume bottle on dark marble',
+      negativePrompt: 'warped label',
+      aspectRatio: '1:1',
+      model: 'gemini-3.1-flash-image',
+      referenceImageBase64: rubyProduct,
+      lockProductForeground: true,
+    });
+
+    assert.equal(result.executionMode, 'LIVE_GEMINI_API');
+    assert.equal(result.fidelityVerified, true);
+    assert.equal(result.fidelityScore, 1);
+
+    // Independently decode the actual delivered result.imageUrl and prove pixel preservation
+    const isolated = await isolateProductForeground(rubyProduct);
+    const independentCheck = await verifyDeliveredImageFidelity(isolated, result.imageUrl);
+    assert.equal(independentCheck.fidelityVerified, true);
+    assert.equal(independentCheck.fidelityScore, 1);
+    assert.equal(independentCheck.exactPixelMatchRatio, 1);
   });
 });

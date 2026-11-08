@@ -25,7 +25,11 @@ export const SUBSCRIPTION_PLANS: Record<PlanTier, PlanConfig> = {
     maxBrands: 1,
     maxTeamSeats: 1,
     priorityQueue: false,
-    resolution: 'HD'
+    resolution: 'HD',
+    defaultModel: 'gemini-3.1-flash-image',
+    defaultImageSize: '1K',
+    maxImageSize: '1K',
+    allowedModels: ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']
   },
   STARTER: {
     tier: 'STARTER',
@@ -52,7 +56,11 @@ export const SUBSCRIPTION_PLANS: Record<PlanTier, PlanConfig> = {
     maxBrands: 1,
     maxTeamSeats: 1,
     priorityQueue: false,
-    resolution: 'HD'
+    resolution: 'HD',
+    defaultModel: 'gemini-3.1-flash-image',
+    defaultImageSize: '1K',
+    maxImageSize: '1K',
+    allowedModels: ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']
   },
   PRO: {
     tier: 'PRO',
@@ -82,7 +90,11 @@ export const SUBSCRIPTION_PLANS: Record<PlanTier, PlanConfig> = {
     maxBrands: 3,
     maxTeamSeats: 2,
     priorityQueue: true,
-    resolution: '4K'
+    resolution: '4K',
+    defaultModel: 'gemini-3.1-flash-image',
+    defaultImageSize: '1K',
+    maxImageSize: '4K',
+    allowedModels: ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'gemini-3-pro-image']
   },
   AGENCY: {
     tier: 'AGENCY',
@@ -112,7 +124,11 @@ export const SUBSCRIPTION_PLANS: Record<PlanTier, PlanConfig> = {
     maxBrands: 999,
     maxTeamSeats: 5,
     priorityQueue: true,
-    resolution: '4K'
+    resolution: '4K',
+    defaultModel: 'gemini-3.1-flash-image',
+    defaultImageSize: '1K',
+    maxImageSize: '4K',
+    allowedModels: ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'gemini-3-pro-image']
   }
 };
 

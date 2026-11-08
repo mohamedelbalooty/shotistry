@@ -69,6 +69,7 @@ export default function StudioPage() {
   const [selectedPresetId, setSelectedPresetId] = useState('gulf_luxury_marble');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [customDirectives, setCustomDirectives] = useState('');
+  const [lockProductForeground, setLockProductForeground] = useState<boolean>(true);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
   // Generation state
@@ -139,6 +140,7 @@ export default function StudioPage() {
           aspectRatio,
           customDirectives: customDirectives.trim() || undefined,
           rawImageBase64: uploadedImage,
+          lockProductForeground,
         }),
       });
 
@@ -382,6 +384,21 @@ export default function StudioPage() {
               />
             </div>
 
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-dark-950 border border-dark-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={lockProductForeground}
+                onChange={(e) => setLockProductForeground(e.target.checked)}
+                className="mt-0.5 rounded border-dark-700 bg-dark-900 text-brand-500 focus:ring-brand-500"
+              />
+              <span className="text-xs text-gray-300 leading-relaxed">
+                <strong className="text-white block">
+                  قفل بكسلات المنتج والشعار (Foreground Lock Compositing)
+                </strong>
+                دمج المنتج المعزول الأصلي فوق الخلفية المولّدة للحفاظ التام على الشعار والنصوص، مع قياس التطابق على الصورة النهائية المسلّمة.
+              </span>
+            </label>
+
             {/* Submit Action */}
             <div className="pt-4 space-y-2">
               <button
@@ -420,10 +437,16 @@ export default function StudioPage() {
               </h2>
               {activeResult && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium flex items-center gap-1">
+                  <span
+                    className={`text-xs px-2.5 py-1 rounded-full font-medium flex items-center gap-1 border ${
+                      activeResult.fidelityVerified
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                    }`}
+                  >
                     <ShieldCheck className="w-3.5 h-3.5" />
                     <span>
-                      حفظ بكسلات المنتج: {(activeResult.fidelityScore * 100).toFixed(1)}%
+                      تطابق الصورة النهائية للمنتج: {(activeResult.fidelityScore * 100).toFixed(1)}%
                     </span>
                   </span>
                   {activeResult.synthIdDetected ? (

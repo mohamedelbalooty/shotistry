@@ -1,6 +1,6 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { resetDbForTests } from '../src/lib/db/prisma.ts';
+import { resetDbForTests, getDb } from '../src/lib/db/prisma.ts';
 import { CreditLedgerService } from '../src/lib/ledger/credit-ledger-service.ts';
 import { createSampleProductPngDataUrl } from '../src/lib/ai/image-processor.ts';
 import { signAssetUrl, verifySignedAssetUrl } from '../src/lib/storage/asset-storage.ts';
@@ -182,6 +182,65 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
       expiredSigned.signature
     );
     assert.equal(expiredCheck.valid, false);
+  });
+
+  test('enforces plan model/resolution entitlements (403 on Free 4K/Pro) and deducts weighted credits for Pro 4K shoots', async () => {
+    const ledger = new CreditLedgerService();
+    await ledger.ensureWorkspace({
+      userId: 'user-plan-gate',
+      workspaceId: 'ws-plan-gate',
+    });
+
+    // FREE plan requesting gemini-3-pro-image at 4K must be rejected with 403
+    const freeProReq = new Request('http://localhost:3000/api/photoshoots/generate', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-workspace-id': 'ws-plan-gate',
+        'x-user-id': 'user-plan-gate',
+      },
+      body: JSON.stringify({
+        productTitle: 'Luxury Oud',
+        productCategory: 'Fragrances',
+        presetId: 'gulf_luxury_marble',
+        aspectRatio: '1:1',
+        model: 'gemini-3-pro-image',
+        imageSize: '4K',
+        rawImageBase64: sampleImage,
+      }),
+    });
+    const freeProRes = await generatePhotoshootPost(freeProReq);
+    assert.equal(freeProRes.status, 403);
+
+    // Upgrade workspace to PRO plan with sufficient credits (5 -> 10)
+    const db = getDb();
+    db.prepare(
+      `UPDATE "Subscription" SET "planTier" = 'PRO', "status" = 'ACTIVE', "monthlyCredits" = 200 WHERE "workspaceId" = ?`
+    ).run('ws-plan-gate');
+
+    const pro4kReq = new Request('http://localhost:3000/api/photoshoots/generate', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-workspace-id': 'ws-plan-gate',
+        'x-user-id': 'user-plan-gate',
+      },
+      body: JSON.stringify({
+        productTitle: 'Luxury Oud',
+        productCategory: 'Fragrances',
+        presetId: 'gulf_luxury_marble',
+        aspectRatio: '1:1',
+        model: 'gemini-3-pro-image',
+        imageSize: '4K',
+        rawImageBase64: sampleImage,
+      }),
+    });
+    const pro4kRes = await generatePhotoshootPost(pro4kReq);
+    assert.equal(pro4kRes.status, 200);
+    const pro4kBody = await pro4kRes.json();
+    assert.equal(pro4kBody.data.modelUsed, 'gemini-3-pro-image');
+    assert.equal(pro4kBody.data.creditsCharged, 4);
+    assert.equal(pro4kBody.data.remainingCredits, 1); // 5 - 4 credits
   });
 });
 

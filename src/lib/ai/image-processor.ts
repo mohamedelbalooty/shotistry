@@ -57,6 +57,14 @@ export interface ProductFidelityReport {
   sampledForegroundPixels: number;
 }
 
+export interface DeliveredImageFidelityReport extends ProductFidelityReport {
+  exactPixelMatchRatio: number;
+  exactMatchedPixels: number;
+  meanChannelError: number;
+  deliveredWidth: number;
+  deliveredHeight: number;
+}
+
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 // Precompute CRC32 table for standard PNG chunk encoding
@@ -512,6 +520,130 @@ export async function isolateProductForeground(
   const bgG = Math.round(gSum / sampleCoords.length);
   const bgB = Math.round(bSum / sampleCoords.length);
 
+  let borderMaxDist = 0;
+  for (const [sx, sy] of sampleCoords) {
+    const idx = (sy * width + sx) * 4;
+    const d = Math.sqrt(
+      (pixels[idx] - bgR) ** 2 +
+        (pixels[idx + 1] - bgG) ** 2 +
+        (pixels[idx + 2] - bgB) ** 2
+    );
+    if (d > borderMaxDist) borderMaxDist = d;
+  }
+
+  const totalPixels = width * height;
+  const colorDistances = new Float32Array(totalPixels);
+  let highContrastCount = 0;
+  const standardThreshold = 26;
+
+  for (let p = 0; p < totalPixels; p++) {
+    const idx = p * 4;
+    const a = pixels[idx + 3];
+    if (a <= 25) {
+      colorDistances[p] = 0;
+      continue;
+    }
+    const dist = Math.sqrt(
+      (pixels[idx] - bgR) ** 2 +
+        (pixels[idx + 1] - bgG) ** 2 +
+        (pixels[idx + 2] - bgB) ** 2
+    );
+    colorDistances[p] = dist;
+    if (dist > standardThreshold) {
+      highContrastCount++;
+    }
+  }
+
+  // Adaptive threshold for low-contrast white products on white backgrounds
+  const effectiveThreshold =
+    highContrastCount >= totalPixels * 0.05
+      ? standardThreshold
+      : Math.max(7, borderMaxDist + 4);
+
+  // Build foreground barrier map
+  const isBarrier = new Uint8Array(totalPixels);
+  for (let p = 0; p < totalPixels; p++) {
+    if (pixels[p * 4 + 3] > 25 && colorDistances[p] > effectiveThreshold) {
+      isBarrier[p] = 1;
+    }
+  }
+
+  // Close 1px anti-aliased contour gaps so exterior flood-fill cannot leak into glass or white interiors
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const p = y * width + x;
+      if (!isBarrier[p]) {
+        const horizClosed = isBarrier[p - 1] === 1 && isBarrier[p + 1] === 1;
+        const vertClosed =
+          isBarrier[p - width] === 1 && isBarrier[p + width] === 1;
+        if (horizClosed || vertClosed) {
+          isBarrier[p] = 1;
+        }
+      }
+    }
+  }
+
+  // 4-connected Exterior Border BFS Flood-Fill:
+  // Only background pixels connected to the outer perimeter are marked as exterior background (isExteriorBg = 1).
+  // All interior pixels enclosed by the product silhouette (white brand logos, white labels,
+  // clear glass chambers, white skincare bodies, and mirror specular reflections) remain foreground (isExteriorBg = 0).
+  const isExteriorBg = new Uint8Array(totalPixels);
+  const queue = new Int32Array(totalPixels);
+  let head = 0;
+  let tail = 0;
+
+  const trySeedBorderPixel = (x: number, y: number) => {
+    const p = y * width + x;
+    if (!isBarrier[p] && !isExteriorBg[p]) {
+      isExteriorBg[p] = 1;
+      queue[tail++] = p;
+    }
+  };
+
+  for (let x = 0; x < width; x++) {
+    trySeedBorderPixel(x, 0);
+    trySeedBorderPixel(x, height - 1);
+  }
+  for (let y = 1; y < height - 1; y++) {
+    trySeedBorderPixel(0, y);
+    trySeedBorderPixel(width - 1, y);
+  }
+
+  while (head < tail) {
+    const p = queue[head++];
+    const x = p % width;
+    const y = (p - x) / width;
+
+    if (x > 0) {
+      const left = p - 1;
+      if (!isBarrier[left] && !isExteriorBg[left]) {
+        isExteriorBg[left] = 1;
+        queue[tail++] = left;
+      }
+    }
+    if (x < width - 1) {
+      const right = p + 1;
+      if (!isBarrier[right] && !isExteriorBg[right]) {
+        isExteriorBg[right] = 1;
+        queue[tail++] = right;
+      }
+    }
+    if (y > 0) {
+      const up = p - width;
+      if (!isBarrier[up] && !isExteriorBg[up]) {
+        isExteriorBg[up] = 1;
+        queue[tail++] = up;
+      }
+    }
+    if (y < height - 1) {
+      const down = p + width;
+      if (!isBarrier[down] && !isExteriorBg[down]) {
+        isExteriorBg[down] = 1;
+        queue[tail++] = down;
+      }
+    }
+  }
+
   const foregroundRgba = new Uint8Array(width * height * 4);
   const maskRgba = new Uint8Array(width * height * 4);
   const maskAlpha = new Uint8Array(width * height);
@@ -522,18 +654,16 @@ export async function isolateProductForeground(
   let maxY = 0;
   let foregroundPixels = 0;
 
-  const colorThreshold = 26; // Euclidean RGB distance threshold from background
-
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
+      const p = y * width + x;
+      const idx = p * 4;
       const r = pixels[idx];
       const g = pixels[idx + 1];
       const b = pixels[idx + 2];
       const a = pixels[idx + 3];
 
-      const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
-      const isForeground = a > 25 && dist > colorThreshold;
+      const isForeground = a > 25 && isExteriorBg[p] === 0;
 
       if (isForeground) {
         foregroundPixels++;
@@ -542,7 +672,7 @@ export async function isolateProductForeground(
         if (x > maxX) maxX = x;
         if (y > maxY) maxY = y;
 
-        maskAlpha[y * width + x] = 255;
+        maskAlpha[p] = 255;
         foregroundRgba[idx] = r;
         foregroundRgba[idx + 1] = g;
         foregroundRgba[idx + 2] = b;
@@ -553,7 +683,7 @@ export async function isolateProductForeground(
         maskRgba[idx + 2] = 255;
         maskRgba[idx + 3] = 255;
       } else {
-        maskAlpha[y * width + x] = 0;
+        maskAlpha[p] = 0;
         foregroundRgba[idx] = 0;
         foregroundRgba[idx + 1] = 0;
         foregroundRgba[idx + 2] = 0;
@@ -612,11 +742,53 @@ export async function isolateProductForeground(
   };
 }
 
-export function getResolutionForAspectRatio(aspectRatio: AspectRatio): {
+export function getResolutionForAspectRatio(
+  aspectRatio: AspectRatio,
+  imageSize: '512' | '1K' | '2K' | '4K' = '1K'
+): {
   resolution: string;
   canvasWidth: number;
   canvasHeight: number;
 } {
+  if (imageSize === '512') {
+    switch (aspectRatio) {
+      case '4:5':
+        return { resolution: '512x640', canvasWidth: 160, canvasHeight: 200 };
+      case '9:16':
+        return { resolution: '512x910', canvasWidth: 135, canvasHeight: 240 };
+      case '16:9':
+        return { resolution: '910x512', canvasWidth: 240, canvasHeight: 135 };
+      case '1:1':
+      default:
+        return { resolution: '512x512', canvasWidth: 180, canvasHeight: 180 };
+    }
+  }
+  if (imageSize === '2K') {
+    switch (aspectRatio) {
+      case '4:5':
+        return { resolution: '2048x2560 (2K)', canvasWidth: 160, canvasHeight: 200 };
+      case '9:16':
+        return { resolution: '1440x2560 (2K)', canvasWidth: 135, canvasHeight: 240 };
+      case '16:9':
+        return { resolution: '2560x1440 (2K)', canvasWidth: 240, canvasHeight: 135 };
+      case '1:1':
+      default:
+        return { resolution: '2048x2048 (2K)', canvasWidth: 180, canvasHeight: 180 };
+    }
+  }
+  if (imageSize === '4K') {
+    switch (aspectRatio) {
+      case '4:5':
+        return { resolution: '3276x4096 (4K)', canvasWidth: 160, canvasHeight: 200 };
+      case '9:16':
+        return { resolution: '2304x4096 (4K)', canvasWidth: 135, canvasHeight: 240 };
+      case '16:9':
+        return { resolution: '4096x2304 (4K)', canvasWidth: 240, canvasHeight: 135 };
+      case '1:1':
+      default:
+        return { resolution: '4096x4096 (4K)', canvasWidth: 180, canvasHeight: 180 };
+    }
+  }
   switch (aspectRatio) {
     case '4:5':
       return { resolution: '1080x1350', canvasWidth: 160, canvasHeight: 200 };
@@ -878,4 +1050,294 @@ export function verifyProductFidelity(
     preservedPixels,
     sampledForegroundPixels,
   };
+}
+
+export function computeDefaultProductPlacement(
+  isolated: IsolatedProductResult,
+  canvasWidth: number,
+  canvasHeight: number
+): CompositedStudioResult['placement'] {
+  const { boundingBox } = isolated;
+  const horizonY = Math.floor(canvasHeight * 0.72);
+  const maxTargetW = Math.floor(canvasWidth * 0.56);
+  const maxTargetH = Math.floor(canvasHeight * 0.58);
+  const scale = Math.min(
+    maxTargetW / Math.max(1, boundingBox.width),
+    maxTargetH / Math.max(1, boundingBox.height)
+  );
+
+  const destWidth = Math.max(8, Math.round(boundingBox.width * scale));
+  const destHeight = Math.max(8, Math.round(boundingBox.height * scale));
+  const destX = Math.floor((canvasWidth - destWidth) / 2);
+  const destY = Math.max(
+    4,
+    Math.floor(horizonY - destHeight + Math.floor(canvasHeight * 0.06))
+  );
+
+  return {
+    destX,
+    destY,
+    destWidth,
+    destHeight,
+    srcX: boundingBox.x,
+    srcY: boundingBox.y,
+    srcWidth: boundingBox.width,
+    srcHeight: boundingBox.height,
+  };
+}
+
+/**
+ * Composites the customer's exact isolated foreground product pixels onto a separately
+ * generated background/scene image (e.g. from Gemini Interactions API) when 100%
+ * exact pixel preservation of logos, typography, and product geometry is required.
+ */
+export async function compositeProductOnSceneImage(options: {
+  isolated: IsolatedProductResult;
+  sceneImageDataUrl: string;
+  aspectRatio?: AspectRatio;
+  presetId?: string;
+}): Promise<CompositedStudioResult> {
+  const aspectRatio = options.aspectRatio ?? '1:1';
+  const presetId = options.presetId ?? 'gemini-scene';
+  const { resolution } = getResolutionForAspectRatio(aspectRatio);
+  const decodedScene = await decodeProductImage(options.sceneImageDataUrl);
+  const canvasWidth = decodedScene.width;
+  const canvasHeight = decodedScene.height;
+  const canvas = new Uint8Array(decodedScene.pixels);
+
+  const placement = computeDefaultProductPlacement(
+    options.isolated,
+    canvasWidth,
+    canvasHeight
+  );
+  const { destX, destY, destWidth, destHeight } = placement;
+  const {
+    boundingBox,
+    width: srcImgW,
+    height: srcImgH,
+    foregroundRgba,
+    maskAlpha,
+  } = options.isolated;
+
+  // Render contact shadow beneath product base on the scene surface
+  const shadowCenterX = destX + destWidth / 2;
+  const shadowCenterY = destY + destHeight;
+  const shadowRx = Math.max(6, destWidth * 0.58);
+  const shadowRy = Math.max(3, Math.floor(canvasHeight * 0.045));
+
+  for (
+    let y = Math.max(0, Math.floor(shadowCenterY - shadowRy));
+    y < Math.min(canvasHeight, Math.ceil(shadowCenterY + shadowRy));
+    y++
+  ) {
+    for (
+      let x = Math.max(0, Math.floor(shadowCenterX - shadowRx));
+      x < Math.min(canvasWidth, Math.ceil(shadowCenterX + shadowRx));
+      x++
+    ) {
+      const normDist = Math.hypot(
+        (x - shadowCenterX) / shadowRx,
+        (y - shadowCenterY) / shadowRy
+      );
+      if (normDist <= 1) {
+        const shadowStrength = (1 - normDist) ** 1.6 * 0.45;
+        const idx = (y * canvasWidth + x) * 4;
+        canvas[idx] = Math.round(canvas[idx] * (1 - shadowStrength));
+        canvas[idx + 1] = Math.round(canvas[idx + 1] * (1 - shadowStrength));
+        canvas[idx + 2] = Math.round(canvas[idx + 2] * (1 - shadowStrength));
+      }
+    }
+  }
+
+  // Composite exact customer product foreground pixels onto the scene
+  for (let dy = 0; dy < destHeight; dy++) {
+    const sy = Math.min(
+      srcImgH - 1,
+      boundingBox.y + Math.floor((dy / destHeight) * boundingBox.height)
+    );
+    const outY = destY + dy;
+    if (outY < 0 || outY >= canvasHeight) continue;
+
+    for (let dx = 0; dx < destWidth; dx++) {
+      const sx = Math.min(
+        srcImgW - 1,
+        boundingBox.x + Math.floor((dx / destWidth) * boundingBox.width)
+      );
+      const outX = destX + dx;
+      if (outX < 0 || outX >= canvasWidth) continue;
+
+      if (maskAlpha[sy * srcImgW + sx] > 0) {
+        const srcIdx = (sy * srcImgW + sx) * 4;
+        const dstIdx = (outY * canvasWidth + outX) * 4;
+        canvas[dstIdx] = foregroundRgba[srcIdx];
+        canvas[dstIdx + 1] = foregroundRgba[srcIdx + 1];
+        canvas[dstIdx + 2] = foregroundRgba[srcIdx + 2];
+        canvas[dstIdx + 3] = 255;
+      }
+    }
+  }
+
+  return {
+    width: canvasWidth,
+    height: canvasHeight,
+    resolution,
+    aspectRatio,
+    presetId,
+    compositedRgba: canvas,
+    imageDataUrl: encodeRgbaToPngDataUrl(canvasWidth, canvasHeight, canvas),
+    placement,
+  };
+}
+
+function evaluatePlacementFidelity(
+  isolated: IsolatedProductResult,
+  deliveredPixels: Uint8Array,
+  deliveredWidth: number,
+  deliveredHeight: number,
+  placement: CompositedStudioResult['placement']
+): DeliveredImageFidelityReport {
+  const { width: srcW, height: srcH, foregroundRgba, maskAlpha, boundingBox } =
+    isolated;
+
+  let sampledForegroundPixels = 0;
+  let preservedPixels = 0;
+  let exactMatchedPixels = 0;
+  let totalChannelDiff = 0;
+
+  for (let dy = 0; dy < placement.destHeight; dy++) {
+    const sy = Math.min(
+      srcH - 1,
+      boundingBox.y +
+        Math.floor((dy / placement.destHeight) * boundingBox.height)
+    );
+    const outY = placement.destY + dy;
+    if (outY < 0 || outY >= deliveredHeight) continue;
+
+    for (let dx = 0; dx < placement.destWidth; dx++) {
+      const sx = Math.min(
+        srcW - 1,
+        boundingBox.x +
+          Math.floor((dx / placement.destWidth) * boundingBox.width)
+      );
+      const outX = placement.destX + dx;
+      if (outX < 0 || outX >= deliveredWidth) continue;
+
+      if (maskAlpha[sy * srcW + sx] > 0) {
+        sampledForegroundPixels++;
+        const srcIdx = (sy * srcW + sx) * 4;
+        const dstIdx = (outY * deliveredWidth + outX) * 4;
+
+        const dr = Math.abs(foregroundRgba[srcIdx] - deliveredPixels[dstIdx]);
+        const dg = Math.abs(
+          foregroundRgba[srcIdx + 1] - deliveredPixels[dstIdx + 1]
+        );
+        const db = Math.abs(
+          foregroundRgba[srcIdx + 2] - deliveredPixels[dstIdx + 2]
+        );
+
+        totalChannelDiff += (dr + dg + db) / 3;
+
+        if (dr === 0 && dg === 0 && db === 0) {
+          exactMatchedPixels++;
+        }
+        if (dr <= 12 && dg <= 12 && db <= 12) {
+          preservedPixels++;
+        }
+      }
+    }
+  }
+
+  const fidelityScore =
+    sampledForegroundPixels > 0
+      ? Number((preservedPixels / sampledForegroundPixels).toFixed(4))
+      : 0;
+  const exactPixelMatchRatio =
+    sampledForegroundPixels > 0
+      ? Number((exactMatchedPixels / sampledForegroundPixels).toFixed(4))
+      : 0;
+  const meanChannelError =
+    sampledForegroundPixels > 0
+      ? Number((totalChannelDiff / sampledForegroundPixels).toFixed(4))
+      : 255;
+
+  return {
+    fidelityScore,
+    fidelityVerified: fidelityScore >= 0.9,
+    preservedPixels,
+    sampledForegroundPixels,
+    exactPixelMatchRatio,
+    exactMatchedPixels,
+    meanChannelError,
+    deliveredWidth,
+    deliveredHeight,
+  };
+}
+
+/**
+ * Decodes the actual final image delivered to the customer (`deliveredImageDataUrl`)
+ * via Sharp and measures product pixel preservation directly on the delivered asset.
+ * Never evaluates an intermediate buffer in place of the delivered customer asset.
+ */
+export async function verifyDeliveredImageFidelity(
+  isolated: IsolatedProductResult,
+  deliveredImageDataUrl: string,
+  explicitPlacement?: CompositedStudioResult['placement']
+): Promise<DeliveredImageFidelityReport> {
+  const decodedDelivered = await decodeProductImage(deliveredImageDataUrl);
+  const {
+    width: deliveredWidth,
+    height: deliveredHeight,
+    pixels: deliveredPixels,
+  } = decodedDelivered;
+
+  if (explicitPlacement) {
+    return evaluatePlacementFidelity(
+      isolated,
+      deliveredPixels,
+      deliveredWidth,
+      deliveredHeight,
+      explicitPlacement
+    );
+  }
+
+  const studioPlacement = computeDefaultProductPlacement(
+    isolated,
+    deliveredWidth,
+    deliveredHeight
+  );
+  const studioReport = evaluatePlacementFidelity(
+    isolated,
+    deliveredPixels,
+    deliveredWidth,
+    deliveredHeight,
+    studioPlacement
+  );
+
+  if (
+    deliveredWidth === isolated.width &&
+    deliveredHeight === isolated.height
+  ) {
+    const nativePlacement: CompositedStudioResult['placement'] = {
+      destX: isolated.boundingBox.x,
+      destY: isolated.boundingBox.y,
+      destWidth: isolated.boundingBox.width,
+      destHeight: isolated.boundingBox.height,
+      srcX: isolated.boundingBox.x,
+      srcY: isolated.boundingBox.y,
+      srcWidth: isolated.boundingBox.width,
+      srcHeight: isolated.boundingBox.height,
+    };
+    const nativeReport = evaluatePlacementFidelity(
+      isolated,
+      deliveredPixels,
+      deliveredWidth,
+      deliveredHeight,
+      nativePlacement
+    );
+    if (nativeReport.fidelityScore > studioReport.fidelityScore) {
+      return nativeReport;
+    }
+  }
+
+  return studioReport;
 }

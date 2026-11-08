@@ -183,7 +183,7 @@ export default function AdminPage() {
             {metrics.grossMarginPercent}%
           </div>
           <p className="text-[11px] text-gray-500">
-            تكلفة Gemini الفعلية: ${metrics.aiExpensesUsd} ($0.0336 / 1K)
+            تكلفة Gemini الفعلية: ${metrics.aiExpensesUsd} ($0.0711 / 1K gemini-3.1-flash-image)
           </p>
         </div>
 

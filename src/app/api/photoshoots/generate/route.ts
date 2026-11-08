@@ -1,10 +1,18 @@
 import crypto from 'node:crypto';
 import { PromptSynthesizer } from '../../../../lib/ai/prompt-synthesizer.ts';
-import { GeminiClient } from '../../../../lib/ai/gemini-client.ts';
+import {
+  GeminiClient,
+  normalizeImageSizeForModel,
+} from '../../../../lib/ai/gemini-client.ts';
 import { CreditLedgerService } from '../../../../lib/ledger/credit-ledger-service.ts';
 import { resolveWorkspaceSession } from '../../../../lib/auth/session.ts';
 import { withSerializableTransaction } from '../../../../lib/db/prisma.ts';
-import type { AspectRatio } from '../../../../lib/types/index.ts';
+import { SUBSCRIPTION_PLANS } from '../../../../lib/pricing/plans.ts';
+import {
+  getCreditWeightForGeneration,
+  validatePlanModelEntitlement,
+} from '../../../../lib/pricing/model-costs.ts';
+import type { AspectRatio, PlanTier } from '../../../../lib/types/index.ts';
 
 export async function POST(request: Request) {
   try {
@@ -20,6 +28,8 @@ export async function POST(request: Request) {
       customDirectives,
       rawImageBase64,
       model,
+      imageSize,
+      lockProductForeground,
     } = body;
 
     if (!productTitle || typeof productTitle !== 'string' || !productTitle.trim()) {
@@ -43,8 +53,13 @@ export async function POST(request: Request) {
     // 1. Resolve and authorize workspace ownership
     const session = await resolveWorkspaceSession(request, requestedWorkspaceId);
     const ledger = new CreditLedgerService();
+    const rawTier = session.workspace.planTier;
+    const planTier: PlanTier = (
+      rawTier in SUBSCRIPTION_PLANS ? rawTier : 'FREE'
+    ) as PlanTier;
+    const plan = SUBSCRIPTION_PLANS[planTier];
 
-    // 2. Synthesize 10-component studio prompt targeting active Gemini Nano Banana model
+    // 2. Synthesize 10-component studio prompt targeting active Gemini model & validate plan entitlement
     const synthesized = PromptSynthesizer.synthesize({
       productTitle: productTitle.trim(),
       productCategory,
@@ -53,8 +68,29 @@ export async function POST(request: Request) {
       brandName,
       brandAesthetic,
       customDirectives,
-      targetModel: model,
+      targetModel: model ?? plan.defaultModel,
     });
+    const effectiveImageSize = normalizeImageSizeForModel(
+      imageSize ?? plan.defaultImageSize,
+      synthesized.targetModel
+    );
+
+    const entitlement = validatePlanModelEntitlement(
+      planTier,
+      synthesized.targetModel,
+      effectiveImageSize
+    );
+    if (!entitlement.allowed) {
+      return Response.json(
+        { success: false, error: entitlement.reason },
+        { status: 403 }
+      );
+    }
+
+    const creditCost = getCreditWeightForGeneration(
+      synthesized.targetModel,
+      effectiveImageSize
+    );
 
     // 3. Create persistent Photoshoot & GenerationJob in SQL
     const jobRecord = await ledger.createPhotoshootJob({
@@ -67,16 +103,16 @@ export async function POST(request: Request) {
       modelUsed: synthesized.targetModel,
       rawPrompt: customDirectives ? `${productTitle}: ${customDirectives}` : productTitle,
       synthesizedPrompt: synthesized.fullPrompt,
-      creditCost: 1,
+      creditCost,
     });
 
-    // 4. Atomically reserve 1 credit before AI execution (402 if insufficient)
+    // 4. Atomically reserve credits before AI execution (402 if insufficient)
     let reservation;
     try {
       reservation = await ledger.reserveCredits({
         workspaceId: session.workspaceId,
         generationJobId: jobRecord.id,
-        amount: 1,
+        amount: creditCost,
       });
     } catch (resErr: unknown) {
       const msg = resErr instanceof Error ? resErr.message : 'Credit reservation failed';
@@ -94,9 +130,11 @@ export async function POST(request: Request) {
         prompt: synthesized.fullPrompt,
         negativePrompt: synthesized.negativePrompt,
         aspectRatio: aspectRatio as AspectRatio,
+        imageSize: effectiveImageSize,
         model: synthesized.targetModel,
         presetId,
         referenceImageBase64: rawImageBase64,
+        lockProductForeground: Boolean(lockProductForeground),
       });
 
       // 6. Settle credit reservation and persist GeneratedImage + COMPLETED job state
@@ -137,7 +175,7 @@ export async function POST(request: Request) {
           photoshootId: jobRecord.photoshootId,
           components: synthesized.components,
           negativePrompt: synthesized.negativePrompt,
-          creditsCharged: 1,
+          creditsCharged: creditCost,
           remainingCredits: updatedBalance.availableCredits,
           ledgerEntryId: settlement.ledgerEntry.id,
         },

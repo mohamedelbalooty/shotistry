@@ -3,7 +3,7 @@
 ## 1. Business Model Overview
 Shotistry operates as a hybrid **B2B SaaS subscription and usage-based platform** designed specifically for e-commerce brands, solo-entrepreneurs, and digital marketing agencies across Egypt and Saudi Arabia.
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                        SHOTISTRY MONETIZATION ENGINE                       │
 ├───────────────────────────────┬────────────────────────────────────────────┤
@@ -27,20 +27,18 @@ Shotistry operates as a hybrid **B2B SaaS subscription and usage-based platform*
 2. **On-Demand Credit Top-Ups:**
    - Available exclusively to active paid subscribers or trial users needing immediate burst capacity.
    - Top-up credits **never expire** as long as the user account remains in good standing.
-3. **Credit Accounting & Safety Invariant:**
-   - 1 Generated Image = 1 Credit consumed.
-   - Failed, timed-out, or policy-rejected generations automatically refund the reserved credit in real-time via the double-entry credit ledger.
-   - Zero risk of silent credit burn.
+3. **Weighted Credit Accounting & Safety Invariant:**
+   - Standard `1K` generation (`gemini-3.1-flash-image` / `gemini-3.1-flash-lite-image`) = **1 Credit consumed**.
+   - High-resolution & Pro studio tiers consume weighted credits (`2` credits for `2K` Flash or `1K`/`2K` Pro, `3` credits for `4K` Flash, `4` credits for `4K` Pro) enforced server-side (`src/lib/pricing/model-costs.ts`) to protect regional gross margins.
+   - Failed, timed-out, or policy-rejected generations automatically release the `CreditReservation` in real-time via the double-entry credit ledger — **zero loss on failure**.
 
 ---
 
 ## 3. Customer Acquisition & Growth Mechanics
 1. **Free Value-First Trial:**
-   - 5 free credits upon email and phone verification.
-   - Watermarked exports with standard resolution to showcase photo-realism without commercial exploitation.
+   - 5 free credits upon workspace provisioning (`1K` max, `Flash`/`Lite` models).
 2. **Platform Ecosystem Partnerships:**
-   - Deep app-store integration with **Salla (سلة)** and **Zid (زد)** App Stores in Saudi Arabia.
+   - Planned app-store integrations with **Salla (سلة)** and **Zid (زد)** App Stores in Saudi Arabia.
    - Referral program: Existing merchants earn 25 bonus credits for every paying store referred.
 3. **Agency Partner Program:**
-   - Agencies receive volume tiering, multiple brand workspaces, team access, and a 15% revenue share on client subscriptions they manage.
-
+   - Agencies receive volume tiering, unlimited brand workspaces, 5 team collaboration seats, and asynchronous Batch API processing.

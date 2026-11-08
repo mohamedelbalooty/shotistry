@@ -102,6 +102,13 @@ describe('Admin Metrics & Audited Credit Adjustments (Real SQL Aggregates)', () 
     assert.equal(metrics.generationSuccessRate, 100);
     assert.equal(metrics.recentJobs.length, 1);
     assert.equal(metrics.recentJobs[0].model, 'gemini-3.1-flash-image');
+    assert.notEqual(
+      metrics.aiExpensesUsd,
+      0.0336,
+      'Must not use Lite model $0.0336 price for gemini-3.1-flash-image job'
+    );
+    assert.equal(metrics.aiExpensesUsd, 0.0711);
+    assert.equal(metrics.recentJobs[0].cost, '$0.0711');
   });
 
   test('executes audited credit adjustments and writes immutable AdminAuditLog in SQL', async () => {

@@ -39,6 +39,8 @@ export type GeminiImageModelId =
 
 export type GeminiImageSize = '512' | '1K' | '2K' | '4K';
 
+export type GeminiServiceTier = 'standard' | 'batch' | 'flex' | 'priority';
+
 export type SupportedImageMimeType = 'image/png' | 'image/jpeg' | 'image/webp';
 
 export type ExecutionMode = 'LIVE_GEMINI_API' | 'LOCAL_COMPOSITE_SANDBOX';
@@ -63,6 +65,10 @@ export interface PlanConfig {
   maxTeamSeats: number;
   priorityQueue: boolean;
   resolution: 'HD' | '4K';
+  defaultModel: GeminiImageModelId;
+  defaultImageSize: GeminiImageSize;
+  maxImageSize: GeminiImageSize;
+  allowedModels: GeminiImageModelId[];
 }
 
 export interface TopUpPackConfig {

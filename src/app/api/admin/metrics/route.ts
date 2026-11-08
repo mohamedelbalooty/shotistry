@@ -1,6 +1,27 @@
 import { getDb } from '../../../../lib/db/prisma.ts';
 import { SUBSCRIPTION_PLANS } from '../../../../lib/pricing/plans.ts';
-import type { PlanTier } from '../../../../lib/types/index.ts';
+import {
+  MODEL_PRICING_CATALOG,
+  calculateModelGenerationCost,
+} from '../../../../lib/pricing/model-costs.ts';
+import type {
+  GeminiImageModelId,
+  GeminiImageSize,
+  PlanTier,
+} from '../../../../lib/types/index.ts';
+
+function resolveModelId(rawModel: unknown): GeminiImageModelId {
+  const candidate = String(rawModel || 'gemini-3.1-flash-image') as GeminiImageModelId;
+  return candidate in MODEL_PRICING_CATALOG ? candidate : 'gemini-3.1-flash-image';
+}
+
+function resolveImageSize(rawResolution: unknown): GeminiImageSize {
+  const res = String(rawResolution || '').toUpperCase();
+  if (res.includes('4K') || res.includes('4096')) return '4K';
+  if (res.includes('2K') || res.includes('2048')) return '2K';
+  if (res.includes('512')) return '512';
+  return '1K';
+}
 
 function isAuthorizedAdmin(request: Request): boolean {
   const roleHeader = request.headers.get('x-user-role')?.trim().toUpperCase();
@@ -71,8 +92,26 @@ export async function GET(request: Request) {
   const generationSuccessRate =
     totalJobs > 0 ? Number(((completedJobs / totalJobs) * 100).toFixed(1)) : 0;
 
-  // Official Gemini Nano Banana 2.1 cost: $0.0336 per 1K generated image
-  const aiExpensesUsd = Number((totalImagesGenerated * 0.0336).toFixed(4));
+  const generatedImageRows = db
+    .prepare(
+      `SELECT gi."resolution", j."modelUsed"
+       FROM "GeneratedImage" gi
+       LEFT JOIN "GenerationJob" j ON j."id" = gi."generationJobId"`
+    )
+    .all() as Array<{ resolution?: string; modelUsed?: string }>;
+
+  let rawAiExpensesUsd = 0;
+  for (const imgRow of generatedImageRows) {
+    const modelId = resolveModelId(imgRow.modelUsed);
+    const imageSize = resolveImageSize(imgRow.resolution);
+    rawAiExpensesUsd += calculateModelGenerationCost(
+      modelId,
+      imageSize,
+      'standard'
+    ).actualCostPerSuccessfulImageUsd;
+  }
+
+  const aiExpensesUsd = Number(rawAiExpensesUsd.toFixed(4));
   const grossMarginPercent =
     mrrUsd > 0
       ? Number((((mrrUsd - aiExpensesUsd) / mrrUsd) * 100).toFixed(1))
@@ -86,6 +125,7 @@ export async function GET(request: Request) {
               j."startedAt",
               j."completedAt",
               j."createdAt",
+              gi."resolution" AS "resolution",
               p."title" AS "product",
               p."stylePreset" AS "preset",
               u."email" AS "userEmail"
@@ -93,6 +133,7 @@ export async function GET(request: Request) {
        JOIN "Photoshoot" p ON p."id" = j."photoshootId"
        JOIN "Workspace" w ON w."id" = p."workspaceId"
        LEFT JOIN "User" u ON u."id" = w."ownerId"
+       LEFT JOIN "GeneratedImage" gi ON gi."generationJobId" = j."id"
        ORDER BY j."createdAt" DESC
        LIMIT 20`
     )
@@ -100,13 +141,20 @@ export async function GET(request: Request) {
 
   const recentJobs = rawRecentJobs.map((row) => {
     const isCompleted = row.status === 'COMPLETED';
+    const modelId = resolveModelId(row.modelUsed);
+    const imageSize = resolveImageSize(row.resolution);
+    const jobCostUsd = calculateModelGenerationCost(
+      modelId,
+      imageSize,
+      'standard'
+    ).actualCostPerSuccessfulImageUsd;
     return {
       id: String(row.id),
       product: String(row.product || 'Commercial Product'),
       preset: String(row.preset || 'gulf_luxury_marble'),
-      model: String(row.modelUsed || 'gemini-3.1-flash-image'),
+      model: modelId,
       status: isCompleted ? 'SUCCESS' : String(row.status),
-      cost: isCompleted ? '$0.0336' : '$0.0000 (Refunded)',
+      cost: isCompleted ? `$${jobCostUsd.toFixed(4)}` : '$0.0000 (Refunded)',
       user: String(row.userEmail || 'merchant@shotistry.app'),
       createdAt: String(row.createdAt),
     };
