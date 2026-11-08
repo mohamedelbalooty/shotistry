@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import { REGIONAL_PHOTOSHOOT_PRESETS } from '../../lib/ai/presets';
 import { AspectRatio, GenerationResult } from '../../lib/types';
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   Maximize2,
   Cpu,
+  Lock,
 } from 'lucide-react';
 
 /**
@@ -55,13 +57,17 @@ function buildSampleProductCanvasDataUrl(): string {
 export default function StudioPage() {
   const {
     t,
-    workspaceId,
-    userId,
+    isAuthenticated,
+    isAuthLoading,
+    workspaceRole,
+    authorizedFetch,
     credits,
     syncCredits,
     addToHistory,
     history,
   } = useApp();
+
+  const isViewer = workspaceRole === 'VIEWER';
 
   // Wizard state
   const [productTitle, setProductTitle] = useState('عطر مسك العود الملكي');
@@ -109,6 +115,16 @@ export default function StudioPage() {
   };
 
   const handleGenerate = async () => {
+    if (!isAuthenticated) {
+      setErrorMessage(t.authRequiredStudioDesc);
+      return;
+    }
+
+    if (isViewer) {
+      setErrorMessage(t.viewerReadOnlyNotice);
+      return;
+    }
+
     if (!uploadedImage) {
       setErrorMessage('يرجى رفع صورة المنتج أولاً');
       return;
@@ -125,15 +141,12 @@ export default function StudioPage() {
     try {
       setProgressStep('عزل خلفية المنتج واستخراج قناع الدقة (Alpha Mask)...');
 
-      const response = await fetch('/api/photoshoots/generate', {
+      const response = await authorizedFetch('/api/photoshoots/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-workspace-id': workspaceId,
-          'x-user-id': userId,
         },
         body: JSON.stringify({
-          workspaceId,
           productTitle,
           productCategory,
           presetId: selectedPresetId,
@@ -195,6 +208,39 @@ export default function StudioPage() {
           </div>
         </div>
       </div>
+
+      {!isAuthLoading && !isAuthenticated && (
+        <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-sm text-brand-200">
+            <Lock className="w-5 h-5 text-brand-400 shrink-0" />
+            <div>
+              <strong className="text-white block">{t.authRequiredTitle}</strong>
+              <span className="text-xs text-gray-300">{t.authRequiredStudioDesc}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/login?next=/studio"
+              className="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 text-white text-xs font-bold border border-dark-700"
+            >
+              {t.navLogin}
+            </Link>
+            <Link
+              href="/register"
+              className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-xs font-bold"
+            >
+              {t.navRegister}
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {isAuthenticated && isViewer && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-3">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{t.viewerReadOnlyNotice}</span>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-3">
@@ -403,7 +449,7 @@ export default function StudioPage() {
             <div className="pt-4 space-y-2">
               <button
                 onClick={handleGenerate}
-                disabled={isGenerating}
+                disabled={isGenerating || isViewer}
                 className="w-full py-4 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 disabled:opacity-50 text-white font-bold text-sm shadow-lg shadow-brand-500/25 transition-all flex items-center justify-center gap-2"
               >
                 {isGenerating ? (

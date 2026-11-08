@@ -45,3 +45,9 @@
 ### C. End-to-End User Journey Tests
 - Automated test script simulating user registration, onboarding, product creation, photoshoot generation, and credit depletion.
 
+---
+
+## 3. Test Fixtures & Manual Testing Data
+For manual and interactive testing across all roles (`ADMIN`, `USER`, `SUPPORT`), currencies (`EGP`, `SAR`), and studio presets, refer to:
+- **[Test Data Reference Guide](file:///Users/tasawk/StudioProjects/shotistry/docs/qa/test-data.md)**
+- Reset and seed all test accounts and presets at any time with: `npm run seed`

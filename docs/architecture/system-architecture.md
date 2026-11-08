@@ -14,21 +14,20 @@
 │                       APPLICATION LAYER (VERCEL SERVERLESS)                 │
 │  Next.js Route Handlers & Server Actions                                    │
 │  ┌───────────────────────┬───────────────────────┬───────────────────────┐  │
-│  │ Auth & Workspace Svc  │ Photoshoot Orchestr.  │ Paymob & Billing Svc  │  │
+│  │ Auth & Token Service  │ Photoshoot Orchestr.  │ Paymob & Billing Svc  │  │
 │  └───────────────────────┴───────────────────────┴───────────────────────┘  │
 │  ┌───────────────────────┬───────────────────────┬───────────────────────┐  │
-│  │ Double-Entry Ledger   │ Prompt Synthesis Svc  │ Storage Presign Svc   │  │
+│  │ Double-Entry Ledger   │ Distributed Limiter   │ Email Dispatcher      │  │
 │  └───────────────────────┴───────────────────────┴───────────────────────┘  │
-└──────────────────┬───────────────────┬───────────────────┬──────────────────┘
-                   │                   │                   │
-                   ▼                   ▼                   ▼
-┌─────────────────────────┐ ┌─────────────────────┐ ┌─────────────────────────┐
-│     PERSISTENCE LAYER   │ │   AI INFERENCE      │ │     OBJECT STORAGE      │
-│ Managed PostgreSQL      │ │ Google GenAI API    │ │ Cloudflare R2 / S3      │
-│ (Neon / Supabase)       │ │ • gemini-3.1-flash  │ │ • Raw product uploads   │
-│ Prisma ORM              │ │ • Gemini 2.5 Flash  │ │ • Segmented alpha masks │
-│ Strict ACID & Locks     │ │ • SynthID Watermark │ │ • Generated 4K renders  │
-└─────────────────────────┘ └─────────────────────┘ └─────────────────────────┘
+└───────┬──────────────┬──────────────┬──────────────────┬─────────────────┘
+        │              │              │                  │
+        ▼              ▼              ▼                  ▼
+┌──────────────┐ ┌──────────────┐ ┌───────────────┐ ┌──────────────────────┐
+│ PERSISTENCE  │ │ AI INFERENCE │ │ COMMUNICATIONS│ │ DISTRIBUTED LIMITER  │
+│ PostgreSQL 16│ │ Google GenAI │ │ Resend API    │ │ Upstash Redis Cluster│
+│ Prisma ORM   │ │ gemini-3.1   │ │ Bilingual     │ │ Atomic Lua Scripts   │
+│ ACID / Locks │ │ SynthID      │ │ RTL/LTR Email │ │ Fail-closed fallback │
+└──────────────┘ └──────────────┘ └───────────────┘ └──────────────────────┘
 ```
 
 ---
@@ -46,4 +45,3 @@
 3. **Stateless Scalability:**
    - Zero local server disk dependencies. All assets reside in S3/R2 object storage with signed URL access.
    - Application servers can scale from 0 to hundreds of instances seamlessly on Vercel.
-

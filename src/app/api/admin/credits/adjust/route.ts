@@ -1,80 +1,114 @@
 import crypto from 'node:crypto';
-import { getDb, withSerializableTransaction } from '../../../../../lib/db/prisma.ts';
+import { getAdminRepository } from '../../../../../lib/db/repositories/admin-repository.ts';
+import { resolveAuthenticatedSession } from '../../../../../lib/auth/session.ts';
+import {
+  ADMIN_CREDIT_ADJUSTMENT_MAX,
+  SUPPORT_CREDIT_ADJUSTMENT_MAX,
+  hasPlatformPermission,
+  requirePlatformPermission,
+} from '../../../../../lib/auth/rbac.ts';
+import { validateCsrfRequest } from '../../../../../lib/security/csrf.ts';
+import {
+  getClientIp,
+  enforceRateLimitPolicies,
+} from '../../../../../lib/security/rate-limit.ts';
 import { CreditLedgerService } from '../../../../../lib/ledger/credit-ledger-service.ts';
 
 export async function POST(request: Request) {
   try {
-    const roleHeader = (request.headers.get('x-user-role') || 'ADMIN').trim().toUpperCase();
-    if (roleHeader !== 'ADMIN' && roleHeader !== 'SUPPORT') {
+    const session = await resolveAuthenticatedSession(request);
+    const csrf = validateCsrfRequest(request, session.csrfToken);
+    if (!csrf.valid) {
       return Response.json(
-        { success: false, error: 'FORBIDDEN: Admin role required for credit adjustments' },
+        { success: false, error: csrf.reason || 'Invalid CSRF token' },
         { status: 403 }
       );
     }
 
-    const adminUserId = request.headers.get('x-user-id')?.trim() || 'admin-system';
-    const body = await request.json();
-    const targetEmail = String(body?.targetEmail || '').trim();
-    const targetWorkspaceId = String(body?.workspaceId || '').trim();
+    requirePlatformPermission(session, 'platform:credits:adjust:bounded');
+
+    const rateBlocked = await enforceRateLimitPolicies(
+      request,
+      'admin:credits:adjust:actor',
+      { userId: session.userId }
+    );
+    if (rateBlocked) return rateBlocked;
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return Response.json({ success: false, error: 'Malformed JSON body' }, { status: 400 });
+    }
+
+    const targetEmail = typeof body?.targetEmail === 'string' ? body.targetEmail.trim() : '';
+    const targetWorkspaceId =
+      typeof body?.workspaceId === 'string' ? body.workspaceId.trim() : '';
     const amount = Number(body?.amount);
-    const reason = String(body?.reason || '').trim();
+    const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
 
-    if (!Number.isFinite(amount) || amount === 0) {
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount === 0) {
       return Response.json(
-        { success: false, error: 'Valid non-zero credit adjustment amount is required' },
+        { success: false, error: 'Valid non-zero integer credit adjustment amount is required' },
         { status: 400 }
       );
     }
 
-    if (!reason) {
+    if (reason.length < 3) {
       return Response.json(
-        { success: false, error: 'Audit reason is mandatory for credit adjustments' },
+        { success: false, error: 'Audit reason (min 3 chars) is mandatory for credit adjustments' },
         { status: 400 }
       );
     }
 
-    const db = getDb();
-    const ledger = new CreditLedgerService();
+    if (!targetWorkspaceId && !targetEmail) {
+      return Response.json(
+        { success: false, error: 'Either workspaceId or targetEmail is required' },
+        { status: 400 }
+      );
+    }
 
-    // Ensure admin user record exists for foreign key on AdminAuditLog
-    const now = new Date().toISOString();
-    db.prepare(
-      `INSERT OR IGNORE INTO "User" ("id", "email", "name", "role", "country", "locale", "createdAt", "updatedAt")
-       VALUES (?, ?, 'System Administrator', 'ADMIN', 'SA', 'ar', ?, ?)`
-    ).run(adminUserId, `${adminUserId}@admin.shotistry.app`, now, now);
-
-    // Resolve target workspace by email or workspaceId
-    let resolvedWorkspaceId = targetWorkspaceId;
-    if (!resolvedWorkspaceId && targetEmail) {
-      const foundWs = db
-        .prepare(
-          `SELECT w."id"
-           FROM "Workspace" w
-           JOIN "User" u ON u."id" = w."ownerId"
-           WHERE LOWER(u."email") = LOWER(?)
-           LIMIT 1`
-        )
-        .get(targetEmail) as { id: string } | undefined;
-
-      if (foundWs) {
-        resolvedWorkspaceId = foundWs.id;
-      } else {
-        // Provision target merchant workspace if not yet created
-        const slug = targetEmail.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
-        const provisioned = await ledger.ensureWorkspace({
-          userId: `user-${slug}`,
-          email: targetEmail,
-          workspaceId: `ws-${slug}`,
-        });
-        resolvedWorkspaceId = provisioned.workspaceId;
+    const isFullAdmin = hasPlatformPermission(session.platformRole, 'platform:credits:adjust');
+    if (!isFullAdmin) {
+      if (amount < 0) {
+        return Response.json(
+          {
+            success: false,
+            error: 'FORBIDDEN: SUPPORT operators cannot deduct credits; ADMIN role required',
+          },
+          { status: 403 }
+        );
       }
+      if (amount > SUPPORT_CREDIT_ADJUSTMENT_MAX) {
+        return Response.json(
+          {
+            success: false,
+            error: `FORBIDDEN: SUPPORT credit grants are capped at ${SUPPORT_CREDIT_ADJUSTMENT_MAX} credits`,
+          },
+          { status: 403 }
+        );
+      }
+    } else if (Math.abs(amount) > ADMIN_CREDIT_ADJUSTMENT_MAX) {
+      return Response.json(
+        {
+          success: false,
+          error: `Adjustment exceeds single-transaction cap (${ADMIN_CREDIT_ADJUSTMENT_MAX})`,
+        },
+        { status: 400 }
+      );
     }
 
-    if (!resolvedWorkspaceId) {
-      resolvedWorkspaceId = 'ws-default-studio';
-      await ledger.ensureWorkspace({ workspaceId: resolvedWorkspaceId });
+    const adminRepo = getAdminRepository();
+    const targetWs = await adminRepo.findTargetWorkspace(targetWorkspaceId, targetEmail);
+    if (!targetWs) {
+      const err = targetWorkspaceId
+        ? `Target workspace '${targetWorkspaceId}' not found`
+        : `No workspace found for target email '${targetEmail}'`;
+      return Response.json({ success: false, error: err }, { status: 404 });
     }
+    const resolvedWorkspaceId = targetWs.workspaceId;
 
+    const ledger = new CreditLedgerService();
     const auditLogId = `audit-${crypto.randomUUID()}`;
     const grant = await ledger.grantCredits({
       workspaceId: resolvedWorkspaceId,
@@ -82,30 +116,23 @@ export async function POST(request: Request) {
       type: 'ADMIN_ADJUSTMENT',
       referenceId: auditLogId,
       idempotencyKey: `admin:adj:${auditLogId}`,
-      description: `Admin adjustment (${reason})`,
+      description: `${session.platformRole} adjustment (${reason})`,
     });
 
-    await withSerializableTransaction((txDb) => {
-      txDb
-        .prepare(
-          `INSERT INTO "AdminAuditLog" ("id", "userId", "action", "targetId", "details", "ipAddress", "createdAt")
-           VALUES (?, ?, 'CREDIT_ADJUSTMENT', ?, ?, ?, ?)`
-        )
-        .run(
-          auditLogId,
-          adminUserId,
-          resolvedWorkspaceId,
-          JSON.stringify({
-            targetEmail,
-            workspaceId: resolvedWorkspaceId,
-            amount,
-            reason,
-            ledgerEntryId: grant.id,
-            balanceAfter: grant.balanceAfter,
-          }),
-          request.headers.get('x-forwarded-for') || '127.0.0.1',
-          now
-        );
+    await adminRepo.recordAdminAdjustmentAudit({
+      auditLogId,
+      userId: session.userId,
+      workspaceId: resolvedWorkspaceId,
+      details: JSON.stringify({
+        operatorRole: session.platformRole,
+        targetEmail: targetEmail || null,
+        workspaceId: resolvedWorkspaceId,
+        amount,
+        reason,
+        ledgerEntryId: grant.id,
+        balanceAfter: grant.balanceAfter,
+      }),
+      ipAddress: getClientIp(request),
     });
 
     return Response.json({
@@ -117,7 +144,13 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Admin credit adjustment failed';
-    return Response.json({ success: false, error: message }, { status: 500 });
+    const status = message.startsWith('UNAUTHORIZED:')
+      ? 401
+      : message.startsWith('FORBIDDEN:')
+        ? 403
+        : message.toLowerCase().includes('negative balance')
+          ? 400
+          : 500;
+    return Response.json({ success: false, error: message }, { status });
   }
 }
-

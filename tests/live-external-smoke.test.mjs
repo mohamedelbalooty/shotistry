@@ -57,5 +57,65 @@ describe('External Live Integration Smoke Gate (Requires Live Credentials)', () 
 
     assert.ok(paymobSecretKey.length >= 10);
   });
-});
 
+  test('LIVE API GATE: Upstash Redis REST atomic rate limiting', async (t) => {
+    const url = process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+    if (
+      !url ||
+      !token ||
+      !url.startsWith('https://') ||
+      url.includes('your-database') ||
+      token === 'changeme' ||
+      token.length < 8
+    ) {
+      t.skip(
+        'BLOCKED (External Credential Required): UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN not set or placeholder. Live Upstash rate limiting is NOT TESTED.'
+      );
+      return;
+    }
+
+    const { createUpstashRateLimitStore } = await import(
+      '../src/lib/security/rate-limit/upstash-store.ts'
+    );
+    const store = createUpstashRateLimitStore({ url, token });
+    const testKey = `shotistry:test:smoke:${Date.now()}`;
+    const result = await store.consume(testKey, 10, 10000);
+
+    assert.equal(result.backend, 'upstash');
+    assert.equal(result.allowed, true);
+    assert.ok(result.remaining >= 0);
+  });
+
+  test('LIVE API GATE: Resend Transactional Email dispatch', async (t) => {
+    const apiKey = process.env.RESEND_API_KEY;
+    const liveTo = process.env.LIVE_EMAIL_TO;
+    if (
+      !apiKey ||
+      !apiKey.startsWith('re_') ||
+      apiKey.includes('placeholder') ||
+      !liveTo ||
+      !liveTo.includes('@')
+    ) {
+      t.skip(
+        'BLOCKED (External Credential Required): RESEND_API_KEY and LIVE_EMAIL_TO not set in environment. Live Resend delivery is NOT TESTED.'
+      );
+      return;
+    }
+
+    const { createResendEmailTransport } = await import(
+      '../src/lib/email/resend-transport.ts'
+    );
+    const transport = createResendEmailTransport({ apiKey });
+    const result = await transport.send({
+      to: liveTo,
+      subject: 'Shotistry Live Integration Test',
+      html: '<p>Live smoke test email</p>',
+      text: 'Live smoke test email',
+      idempotencyKey: `live:smoke:${Date.now()}`,
+    });
+
+    assert.equal(result.provider, 'resend');
+    assert.ok(result.messageId);
+  });
+});

@@ -3,12 +3,31 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseImageInput } from '../ai/image-processor.ts';
 
+const globalForStorage = globalThis as unknown as {
+  __ephemeralAssetSigningKey?: string;
+};
+
 function getSigningSecret(): string {
-  return (
-    process.env.ASSET_SIGNING_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    'shotistry-local-asset-signing-key-hmac-sha256'
-  );
+  const configured = process.env.ASSET_SIGNING_SECRET?.trim() ?? '';
+  const isInvalidOrPlaceholder =
+    configured.length < 16 ||
+    configured.toLowerCase().includes('placeholder') ||
+    configured.toLowerCase().includes('changeme');
+
+  if (!isInvalidOrPlaceholder) {
+    return configured;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'ASSET_SIGNING_SECRET must be configured with at least 16 characters in production'
+    );
+  }
+
+  if (!globalForStorage.__ephemeralAssetSigningKey) {
+    globalForStorage.__ephemeralAssetSigningKey = crypto.randomBytes(32).toString('hex');
+  }
+  return globalForStorage.__ephemeralAssetSigningKey;
 }
 
 export interface SignedAssetUrl {
@@ -92,9 +111,13 @@ export function storeProductAssetBase64(
 }
 
 export function readStoredAsset(key: string): { buffer: Buffer; mimeType: string } | null {
+  if (!key || key.includes('\0')) {
+    return null;
+  }
+  const baseDir = path.resolve(getAssetsBaseDir());
   const normalized = path.normalize(key).replace(/^(\.\.(\/|\\|$))+/, '');
-  const fullPath = path.join(getAssetsBaseDir(), normalized);
-  if (!fullPath.startsWith(getAssetsBaseDir()) || !fs.existsSync(fullPath)) {
+  const fullPath = path.resolve(baseDir, normalized);
+  if (!fullPath.startsWith(baseDir + path.sep) || !fs.existsSync(fullPath)) {
     return null;
   }
   const buffer = fs.readFileSync(fullPath);
@@ -105,4 +128,3 @@ export function readStoredAsset(key: string): { buffer: Buffer; mimeType: string
       : 'image/png';
   return { buffer, mimeType };
 }
-

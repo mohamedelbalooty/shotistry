@@ -1,15 +1,66 @@
 import crypto from 'node:crypto';
 import { SUBSCRIPTION_PLANS, TOP_UP_PACKS } from '../../../../lib/pricing/plans.ts';
 import { PaymobSecurity } from '../../../../lib/paymob/paymob-hmac.ts';
-import { resolveWorkspaceSession } from '../../../../lib/auth/session.ts';
-import { withSerializableTransaction } from '../../../../lib/db/prisma.ts';
+import { resolveAuthenticatedSession } from '../../../../lib/auth/session.ts';
+import { requireWorkspacePermission } from '../../../../lib/auth/rbac.ts';
+import { validateCsrfRequest } from '../../../../lib/security/csrf.ts';
+import { enforceRateLimitPolicies } from '../../../../lib/security/rate-limit.ts';
+import { requireVerifiedEmail } from '../../../../lib/auth/email-verification-guard.ts';
+import { getBillingRepository } from '../../../../lib/db/repositories/billing-repository.ts';
 import { POST as paymobWebhookPost } from '../../webhooks/paymob/route.ts';
 import type { PlanTier } from '../../../../lib/types/index.ts';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const session = await resolveWorkspaceSession(request, body?.workspaceId);
+    const session = await resolveAuthenticatedSession(request, { requireWorkspace: true });
+    const csrf = validateCsrfRequest(request, session.csrfToken);
+    if (!csrf.valid) {
+      return Response.json(
+        { success: false, error: csrf.reason || 'Invalid CSRF token' },
+        { status: 403 }
+      );
+    }
+
+    const workspace = requireWorkspacePermission(session, 'billing:checkout');
+
+    const unverified = requireVerifiedEmail(session);
+    if (unverified) return unverified;
+
+    const rateBlocked = await enforceRateLimitPolicies(
+      request,
+      'billing:checkout_intent:ws',
+      { workspaceId: workspace.workspaceId }
+    );
+    if (rateBlocked) return rateBlocked;
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return Response.json({ success: false, error: 'Malformed JSON body' }, { status: 400 });
+    }
+
+    const requestedWorkspaceId =
+      typeof body.workspaceId === 'string' ? body.workspaceId.trim() : undefined;
+    if (requestedWorkspaceId && requestedWorkspaceId !== workspace.workspaceId) {
+      return Response.json(
+        {
+          success: false,
+          error: 'FORBIDDEN: Requested workspaceId does not match active authenticated workspace',
+        },
+        { status: 403 }
+      );
+    }
+
+    if (body?.sandboxSimulateWebhook === true && process.env.NODE_ENV === 'production') {
+      return Response.json(
+        {
+          success: false,
+          error: 'FORBIDDEN: Sandbox webhook simulation is disabled in production',
+        },
+        { status: 403 }
+      );
+    }
 
     const kind = body?.kind === 'TOP_UP' ? 'TOP_UP' : 'SUBSCRIPTION';
     const currency =
@@ -53,21 +104,15 @@ export async function POST(request: Request) {
     const paymobOrderId = `ord-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const now = new Date().toISOString();
 
-    await withSerializableTransaction((db) => {
-      db.prepare(
-        `INSERT INTO "PaymentTransaction" (
-           "id", "workspaceId", "amountCents", "currency", "paymobOrderId",
-           "paymentMethod", "status", "createdAt"
-         ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)`
-      ).run(
-        transactionId,
-        session.workspaceId,
-        amountCents,
-        currency,
-        paymobOrderId,
-        paymentMethod,
-        now
-      );
+    const billingRepo = getBillingRepository();
+    await billingRepo.createPendingPaymentTransaction({
+      id: transactionId,
+      workspaceId: workspace.workspaceId,
+      amountCents,
+      currency,
+      paymobOrderId,
+      paymentMethod,
+      createdAt: now,
     });
 
     // Optional Sandbox Webhook Simulation (ONLY in non-production environments)
@@ -106,7 +151,7 @@ export async function POST(request: Request) {
             type: 'card',
           },
           success: true,
-          workspace_id: session.workspaceId,
+          workspace_id: workspace.workspaceId,
           credits,
           plan_tier: planTier,
         };
@@ -136,7 +181,7 @@ export async function POST(request: Request) {
       intent: {
         transactionId,
         paymobOrderId,
-        workspaceId: session.workspaceId,
+        workspaceId: workspace.workspaceId,
         kind,
         planTier: planTier ?? null,
         packId: packId ?? null,
@@ -149,7 +194,11 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Checkout intent creation failed';
-    return Response.json({ success: false, error: message }, { status: 500 });
+    const status = message.startsWith('UNAUTHORIZED:')
+      ? 401
+      : message.startsWith('FORBIDDEN:')
+        ? 403
+        : 500;
+    return Response.json({ success: false, error: message }, { status });
   }
 }
-

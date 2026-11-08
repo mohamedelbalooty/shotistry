@@ -1,11 +1,40 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { resetDbForTests, getDb } from '../src/lib/db/prisma.ts';
+import { resetRateLimitsForTests } from '../src/lib/security/rate-limit.ts';
 import { CreditLedgerService } from '../src/lib/ledger/credit-ledger-service.ts';
 import { createSampleProductPngDataUrl } from '../src/lib/ai/image-processor.ts';
 import { signAssetUrl, verifySignedAssetUrl } from '../src/lib/storage/asset-storage.ts';
+import { POST as registerPost } from '../src/app/api/auth/register/route.ts';
 import { POST as generatePhotoshootPost } from '../src/app/api/photoshoots/generate/route.ts';
 import { GET as getJobById } from '../src/app/api/jobs/[id]/route.ts';
+
+function extractCookie(res) {
+  const setCookie = res.headers.get('set-cookie') || '';
+  const match = setCookie.match(/shotistry_session=([^;]+)/);
+  return match ? `shotistry_session=${match[1]}` : '';
+}
+
+async function registerMerchant(email, country = 'SA') {
+  const res = await registerPost(
+    new Request('http://localhost:3000/api/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password: 'MerchantPassword2026!',
+        country,
+      }),
+    })
+  );
+  const body = await res.json();
+  return {
+    cookie: extractCookie(res),
+    csrfToken: body.csrfToken,
+    workspaceId: body.activeWorkspace.workspaceId,
+    userId: body.user.id,
+  };
+}
 
 describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)', () => {
   const sampleImage = createSampleProductPngDataUrl({
@@ -18,15 +47,17 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
 
   beforeEach(async () => {
     await resetDbForTests();
+    resetRateLimitsForTests();
   });
 
   test('rejects generation with 400 when rawImageBase64 is missing', async () => {
+    const merchant = await registerMerchant('studio-1@shotistry.app');
     const req = new Request('http://localhost:3000/api/photoshoots/generate', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-studio-1',
-        'x-user-id': 'user-studio-1',
+        cookie: merchant.cookie,
+        'x-csrf-token': merchant.csrfToken,
       },
       body: JSON.stringify({
         productTitle: 'Luxury Oud',
@@ -43,12 +74,15 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
   });
 
   test('executes end-to-end product transformation, reserves & settles 1 credit, and persists job in SQL', async () => {
+    const merchant = await registerMerchant('studio-2@shotistry.app');
+    const intruder = await registerMerchant('intruder@shotistry.app');
+
     const req = new Request('http://localhost:3000/api/photoshoots/generate', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-studio-2',
-        'x-user-id': 'user-studio-2',
+        cookie: merchant.cookie,
+        'x-csrf-token': merchant.csrfToken,
       },
       body: JSON.stringify({
         productTitle: 'Royal Dates Box',
@@ -75,10 +109,7 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
 
     // Verify job is retrievable via GET /api/jobs/[id] by owning workspace
     const jobReq = new Request(`http://localhost:3000/api/jobs/${body.data.jobId}`, {
-      headers: {
-        'x-workspace-id': 'ws-studio-2',
-        'x-user-id': 'user-studio-2',
-      },
+      headers: { cookie: merchant.cookie },
     });
     const jobRes = await getJobById(jobReq, {
       params: Promise.resolve({ id: body.data.jobId }),
@@ -89,12 +120,9 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     assert.equal(jobData.job.reservationStatus, 'SETTLED');
     assert.equal(jobData.images.length, 1);
 
-    // Verify a different workspace is blocked from reading this job (403 Forbidden)
+    // Verify a different authenticated workspace is blocked from reading this job (403 Forbidden)
     const crossWorkspaceReq = new Request(`http://localhost:3000/api/jobs/${body.data.jobId}`, {
-      headers: {
-        'x-workspace-id': 'ws-intruder',
-        'x-user-id': 'user-intruder',
-      },
+      headers: { cookie: intruder.cookie },
     });
     const crossRes = await getJobById(crossWorkspaceReq, {
       params: Promise.resolve({ id: body.data.jobId }),
@@ -103,14 +131,11 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
   });
 
   test('rejects with 402 Payment Required when workspace has 0 available credits', async () => {
+    const merchant = await registerMerchant('broke@shotistry.app');
     const ledger = new CreditLedgerService();
-    await ledger.ensureWorkspace({
-      userId: 'user-broke',
-      workspaceId: 'ws-broke',
-    });
     // Debit all 5 trial credits via admin adjustment
     await ledger.grantCredits({
-      workspaceId: 'ws-broke',
+      workspaceId: merchant.workspaceId,
       amount: -5,
       type: 'ADMIN_ADJUSTMENT',
       idempotencyKey: 'drain-ws-broke',
@@ -121,8 +146,8 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-broke',
-        'x-user-id': 'user-broke',
+        cookie: merchant.cookie,
+        'x-csrf-token': merchant.csrfToken,
       },
       body: JSON.stringify({
         productTitle: 'Perfume',
@@ -140,12 +165,13 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
   });
 
   test('releases credit reservation if image processing fails so customer loses 0 credits', async () => {
+    const merchant = await registerMerchant('fail-refund@shotistry.app');
     const req = new Request('http://localhost:3000/api/photoshoots/generate', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-fail-refund',
-        'x-user-id': 'user-fail-refund',
+        cookie: merchant.cookie,
+        'x-csrf-token': merchant.csrfToken,
       },
       body: JSON.stringify({
         productTitle: 'Perfume',
@@ -161,7 +187,7 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     assert.ok(res.status >= 400);
 
     const ledger = new CreditLedgerService();
-    const balance = await ledger.getWorkspaceBalance('ws-fail-refund');
+    const balance = await ledger.getWorkspaceBalance(merchant.workspaceId);
     assert.equal(balance.settledBalance, 5);
     assert.equal(balance.reservedCredits, 0);
     assert.equal(balance.availableCredits, 5);
@@ -172,7 +198,11 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     const validCheck = verifySignedAssetUrl(signed.key, signed.expires, signed.signature);
     assert.equal(validCheck.valid, true);
 
-    const tamperedCheck = verifySignedAssetUrl('workspaces/ws-2/other.png', signed.expires, signed.signature);
+    const tamperedCheck = verifySignedAssetUrl(
+      'workspaces/ws-2/other.png',
+      signed.expires,
+      signed.signature
+    );
     assert.equal(tamperedCheck.valid, false);
 
     const expiredSigned = signAssetUrl('workspaces/ws-1/job-1.png', -10);
@@ -185,19 +215,15 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
   });
 
   test('enforces plan model/resolution entitlements (403 on Free 4K/Pro) and deducts weighted credits for Pro 4K shoots', async () => {
-    const ledger = new CreditLedgerService();
-    await ledger.ensureWorkspace({
-      userId: 'user-plan-gate',
-      workspaceId: 'ws-plan-gate',
-    });
+    const merchant = await registerMerchant('plan-gate@shotistry.app');
 
     // FREE plan requesting gemini-3-pro-image at 4K must be rejected with 403
     const freeProReq = new Request('http://localhost:3000/api/photoshoots/generate', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-plan-gate',
-        'x-user-id': 'user-plan-gate',
+        cookie: merchant.cookie,
+        'x-csrf-token': merchant.csrfToken,
       },
       body: JSON.stringify({
         productTitle: 'Luxury Oud',
@@ -212,18 +238,18 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     const freeProRes = await generatePhotoshootPost(freeProReq);
     assert.equal(freeProRes.status, 403);
 
-    // Upgrade workspace to PRO plan with sufficient credits (5 -> 10)
+    // Upgrade workspace to PRO plan
     const db = getDb();
     db.prepare(
       `UPDATE "Subscription" SET "planTier" = 'PRO', "status" = 'ACTIVE', "monthlyCredits" = 200 WHERE "workspaceId" = ?`
-    ).run('ws-plan-gate');
+    ).run(merchant.workspaceId);
 
     const pro4kReq = new Request('http://localhost:3000/api/photoshoots/generate', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-plan-gate',
-        'x-user-id': 'user-plan-gate',
+        cookie: merchant.cookie,
+        'x-csrf-token': merchant.csrfToken,
       },
       body: JSON.stringify({
         productTitle: 'Luxury Oud',
@@ -243,4 +269,3 @@ describe('Studio Generation API, Job Tracking & Signed Asset URLs (Integration)'
     assert.equal(pro4kBody.data.remainingCredits, 1); // 5 - 4 credits
   });
 });
-

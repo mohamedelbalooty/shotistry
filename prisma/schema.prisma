@@ -13,6 +13,13 @@ enum Role {
   SUPPORT
 }
 
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
 enum PlanTier {
   FREE
   STARTER
@@ -57,20 +64,33 @@ enum LedgerTransactionType {
   ADMIN_ADJUSTMENT
 }
 
-model User {
-  id            String      @id @default(uuid())
-  email         String      @unique
-  name          String?
-  phone         String?
-  passwordHash  String?
-  role          Role        @default(USER)
-  country       String      @default("EG") // EG or SA
-  locale        String      @default("ar") // ar or en
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+enum AuthActionTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+  EMAIL_CHANGE
+}
 
-  workspaces    WorkspaceMember[]
-  auditLogs     AdminAuditLog[]
+model User {
+  id                String      @id @default(uuid())
+  email             String      @unique
+  name              String?
+  phone             String?
+  passwordHash      String?
+  role              Role        @default(USER)
+  country           String      @default("EG") // EG or SA
+  locale            String      @default("ar") // ar or en
+  emailVerifiedAt   DateTime?
+  trialGrantedAt    DateTime?
+  passwordUpdatedAt DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  workspaces      WorkspaceMember[]
+  sessions        Session[]
+  auditLogs       AdminAuditLog[]
+  actionTokens    AuthActionToken[]
+  sentInvites     WorkspaceInvite[] @relation("InviteSender")
+  acceptedInvites WorkspaceInvite[] @relation("InviteAccepter")
 }
 
 model Workspace {
@@ -84,25 +104,49 @@ model Workspace {
   updatedAt     DateTime          @updatedAt
 
   members       WorkspaceMember[]
+  activeSessions Session[]
   brands        Brand[]
   photoshoots   Photoshoot[]
   subscription  Subscription?
   creditLedgers CreditLedger[]
   reservations  CreditReservation[]
   transactions  PaymentTransaction[]
+  invites       WorkspaceInvite[]
 }
 
 model WorkspaceMember {
-  id          String     @id @default(uuid())
+  id          String        @id @default(uuid())
   workspaceId String
   userId      String
-  role        String     @default("MEMBER") // OWNER, ADMIN, MEMBER
-  createdAt   DateTime   @default(now())
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
 
-  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
+}
+
+model Session {
+  id                String     @id @default(uuid())
+  userId            String
+  activeWorkspaceId String?
+  tokenHash         String     @unique
+  csrfToken         String
+  userAgent         String?
+  ipAddress         String?
+  createdAt         DateTime   @default(now())
+  lastActivityAt    DateTime   @default(now())
+  idleExpiresAt     DateTime
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  revokedReason     String?
+
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeWorkspace   Workspace? @relation(fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Brand {
@@ -317,3 +361,51 @@ model AdminAuditLog {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+model AuthActionToken {
+  id          String              @id @default(uuid())
+  userId      String
+  type        AuthActionTokenType
+  tokenHash   String              @unique
+  targetEmail String?
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  revokedAt   DateTime?
+  createdIp   String?
+  createdAt   DateTime            @default(now())
+
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+}
+
+model RateLimitBucket {
+  key         String   @id
+  count       Int
+  windowStart DateTime
+  expiresAt   DateTime
+  updatedAt   DateTime
+
+  @@index([expiresAt])
+}
+
+model WorkspaceInvite {
+  id               String        @id @default(uuid())
+  workspaceId      String
+  invitedEmail     String
+  role             WorkspaceRole
+  invitedByUserId  String
+  tokenHash        String        @unique
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  acceptedByUserId String?
+  revokedAt        DateTime?
+  createdAt        DateTime      @default(now())
+
+  workspace        Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy        User          @relation("InviteSender", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  acceptedBy       User?         @relation("InviteAccepter", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, invitedEmail])
+  @@index([expiresAt])
+}

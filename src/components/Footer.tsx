@@ -6,7 +6,9 @@ import { useApp } from '../context/AppContext';
 import { Camera, ShieldCheck, Heart } from 'lucide-react';
 
 export function Footer() {
-  const { t } = useApp();
+  const { t, isAuthenticated, user } = useApp();
+  const isPlatformStaff =
+    isAuthenticated && (user?.role === 'ADMIN' || user?.role === 'SUPPORT');
 
   return (
     <footer className="border-t border-dark-800 bg-dark-950 py-12 text-sm text-gray-400">
@@ -44,10 +46,20 @@ export function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/admin" className="hover:text-brand-400 transition-colors">
-                  {t.navAdmin}
+                <Link
+                  href={isAuthenticated ? '/account' : '/login'}
+                  className="hover:text-brand-400 transition-colors"
+                >
+                  {isAuthenticated ? t.navAccount : t.navLogin}
                 </Link>
               </li>
+              {isPlatformStaff && (
+                <li>
+                  <Link href="/admin" className="hover:text-brand-400 transition-colors">
+                    {t.navAdmin}
+                  </Link>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -57,7 +69,9 @@ export function Footer() {
             <ul className="space-y-2 text-xs text-gray-400">
               <li>🇸🇦 المملكة العربية السعودية (متاجر سلة، زد)</li>
               <li>🇪🇬 جمهورية مصر العربية (إنستغرام، شوبيفاي)</li>
-              <li className="pt-2 text-gray-500">طرق الدفع: مدى، أبل باي، ميزة، فيزا، وماستركارد عبر Paymob</li>
+              <li className="pt-2 text-gray-500">
+                طرق الدفع: مدى، أبل باي، ميزة، فيزا، وماستركارد عبر Paymob
+              </li>
             </ul>
           </div>
         </div>
@@ -65,11 +79,11 @@ export function Footer() {
         <div className="border-t border-dark-800 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-gray-500 gap-4">
           <p>© {new Date().getFullYear()} {t.brandName} (Shotistry Inc). جميع الحقوق محفوظة.</p>
           <p className="flex items-center gap-1">
-            صنع باحترافية للتجارة الإلكترونية في الشرق الأوسط <Heart className="w-3.5 h-3.5 text-rose-500 inline fill-rose-500" />
+            صنع باحترافية للتجارة الإلكترونية في الشرق الأوسط{' '}
+            <Heart className="w-3.5 h-3.5 text-rose-500 inline fill-rose-500" />
           </p>
         </div>
       </div>
     </footer>
   );
 }
-

@@ -3,6 +3,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '../db/prisma.ts';
 import type {
   CreatePhotoshootJobInput,
+  PublicUserRecord,
+  RegisterMerchantInput,
   WorkspaceBalanceSummary,
   WorkspaceProvisionInput,
 } from './credit-ledger-service.ts';
@@ -97,22 +99,233 @@ export class PostgresCreditLedgerService {
     };
   }
 
+  public async registerMerchantWithInitialWorkspace(
+    input: RegisterMerchantInput
+  ): Promise<{
+    user: PublicUserRecord;
+    workspace: WorkspaceBalanceSummary;
+    trialGranted: boolean;
+  }> {
+    const email = input.email.trim().toLowerCase();
+    const country: 'EG' | 'SA' = input.country === 'SA' ? 'SA' : 'EG';
+    const currency: 'EGP' | 'SAR' = country === 'SA' ? 'SAR' : 'EGP';
+    const locale = input.locale === 'en' ? 'en' : 'ar';
+    const name = input.name?.trim() || null;
+    const phone = input.phone?.trim() || null;
+    const workspaceName =
+      input.workspaceName?.trim() ||
+      (name ? `${name} Studio` : 'Merchant Studio');
+
+    return this.withPgSerializableTx(null, async (tx) => {
+      const existing = await tx.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+      });
+
+      if (existing) {
+        throw new Error('CONFLICT: Account with this email already exists');
+      }
+
+      const now = new Date();
+      const userId = `user-${crypto.randomUUID()}`;
+      const workspaceId = `ws-${crypto.randomUUID()}`;
+      const slug = `${workspaceName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'studio'}-${crypto.randomBytes(4).toString('hex')}`;
+
+      await tx.user.create({
+        data: {
+          id: userId,
+          email,
+          name,
+          phone,
+          passwordHash: input.passwordHash,
+          role: 'USER',
+          country,
+          locale,
+          emailVerifiedAt: null,
+          trialGrantedAt: now,
+          passwordUpdatedAt: now,
+        },
+      });
+
+      await tx.workspace.create({
+        data: {
+          id: workspaceId,
+          name: workspaceName,
+          slug,
+          ownerId: userId,
+          country,
+          currency,
+        },
+      });
+
+      await tx.workspaceMember.create({
+        data: {
+          id: `wm-${crypto.randomUUID()}`,
+          workspaceId,
+          userId,
+          role: 'OWNER',
+        },
+      });
+
+      const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await tx.subscription.create({
+        data: {
+          id: `sub-${workspaceId}`,
+          workspaceId,
+          planTier: 'FREE',
+          status: 'ACTIVE',
+          currency,
+          monthlyCredits: 5,
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
+          cancelAtPeriodEnd: false,
+        },
+      });
+
+      const trialIdempotencyKey = `trial:grant:user:${userId}`;
+      await tx.creditLedger.create({
+        data: {
+          id: `led-trial-${userId}`,
+          workspaceId,
+          amount: 5,
+          balanceAfter: 5,
+          type: 'TRIAL_GRANT',
+          referenceId: `init-${workspaceId}`,
+          idempotencyKey: trialIdempotencyKey,
+          description: 'Initial 5 Free Trial Credits',
+        },
+      });
+
+      return {
+        user: {
+          id: userId,
+          email,
+          name,
+          phone,
+          role: 'USER',
+          country,
+          locale,
+          emailVerified: false,
+          createdAt: now.toISOString(),
+        },
+        workspace: {
+          workspaceId,
+          workspaceName,
+          userId,
+          email,
+          country,
+          currency,
+          planTier: 'FREE',
+          subscriptionStatus: 'ACTIVE',
+          settledBalance: 5,
+          reservedCredits: 0,
+          availableCredits: 5,
+        },
+        trialGranted: true,
+      };
+    });
+  }
+
+  public async createAdditionalWorkspaceForUser(input: {
+    userId: string;
+    workspaceName: string;
+    country?: 'EG' | 'SA';
+  }): Promise<WorkspaceBalanceSummary> {
+    const country: 'EG' | 'SA' = input.country === 'SA' ? 'SA' : 'EG';
+    const currency: 'EGP' | 'SAR' = country === 'SA' ? 'SAR' : 'EGP';
+    const workspaceName = input.workspaceName.trim();
+
+    if (!workspaceName) {
+      throw new Error('Workspace name is required');
+    }
+
+    return this.withPgSerializableTx(null, async (tx) => {
+      const user = await tx.user.findUnique({ where: { id: input.userId } });
+      if (!user) {
+        throw new Error(`NOT_FOUND: User ${input.userId} not found`);
+      }
+
+      const now = new Date();
+      const workspaceId = `ws-${crypto.randomUUID()}`;
+      const slug = `${workspaceName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'studio'}-${crypto.randomBytes(4).toString('hex')}`;
+
+      await tx.workspace.create({
+        data: {
+          id: workspaceId,
+          name: workspaceName,
+          slug,
+          ownerId: user.id,
+          country,
+          currency,
+        },
+      });
+
+      await tx.workspaceMember.create({
+        data: {
+          id: `wm-${crypto.randomUUID()}`,
+          workspaceId,
+          userId: user.id,
+          role: 'OWNER',
+        },
+      });
+
+      await tx.subscription.create({
+        data: {
+          id: `sub-${workspaceId}`,
+          workspaceId,
+          planTier: 'FREE',
+          status: 'ACTIVE',
+          currency,
+          monthlyCredits: 0,
+          currentPeriodStart: now,
+          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          cancelAtPeriodEnd: false,
+        },
+      });
+
+      return {
+        workspaceId,
+        workspaceName,
+        userId: user.id,
+        email: user.email,
+        country,
+        currency,
+        planTier: 'FREE',
+        subscriptionStatus: 'ACTIVE',
+        settledBalance: 0,
+        reservedCredits: 0,
+        availableCredits: 0,
+      };
+    });
+  }
+
   public async ensureWorkspace(
     input: WorkspaceProvisionInput = {}
   ): Promise<WorkspaceBalanceSummary> {
-    const userId = input.userId ?? 'user-default-merchant';
-    const email = input.email ?? `${userId}@merchant.shotistry.app`;
+    const userId = input.userId?.trim();
+    const workspaceId = input.workspaceId?.trim();
+    if (!userId || !workspaceId) {
+      throw new Error('userId and workspaceId are required for explicit workspace provisioning');
+    }
+    if (input.role && input.role !== 'USER') {
+      throw new Error('FORBIDDEN: Privileged platform roles cannot be provisioned via ensureWorkspace');
+    }
+
+    const email = (input.email ?? `${userId}@merchant.shotistry.app`).trim().toLowerCase();
     const userName = input.userName ?? 'Shotistry Merchant';
-    const role = input.role ?? 'USER';
-    const workspaceId = input.workspaceId ?? 'ws-default-studio';
-    const workspaceName = input.workspaceName ?? 'Default Studio Workspace';
+    const workspaceName = input.workspaceName ?? 'Studio Workspace';
     const country = input.country ?? 'EG';
     const currency = input.currency ?? (country === 'SA' ? 'SAR' : 'EGP');
 
     return this.withPgSerializableTx(null, async (tx) => {
       let existingUser = await tx.user.findFirst({
         where: {
-          OR: [{ id: userId }, { email }],
+          OR: [{ id: userId }, { email: { equals: email, mode: 'insensitive' } }],
         },
       });
 
@@ -122,7 +335,7 @@ export class PostgresCreditLedgerService {
             id: userId,
             email,
             name: userName,
-            role,
+            role: 'USER',
             country,
             locale: 'ar',
           },
@@ -163,6 +376,7 @@ export class PostgresCreditLedgerService {
           },
         });
 
+        const canGrantTrial = !existingUser.trialGrantedAt;
         const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         await tx.subscription.upsert({
           where: { workspaceId },
@@ -173,31 +387,39 @@ export class PostgresCreditLedgerService {
             planTier: 'FREE',
             status: 'ACTIVE',
             currency,
-            monthlyCredits: 5,
+            monthlyCredits: canGrantTrial ? 5 : 0,
             currentPeriodStart: new Date(),
             currentPeriodEnd: periodEnd,
             cancelAtPeriodEnd: false,
           },
         });
 
-        const trialIdempotencyKey = `trial:grant:${workspaceId}`;
-        await tx.creditLedger.upsert({
-          where: { idempotencyKey: trialIdempotencyKey },
-          update: {},
-          create: {
-            id: `led-trial-${workspaceId}`,
-            workspaceId,
-            amount: 5,
-            balanceAfter: 5,
-            type: 'TRIAL_GRANT',
-            referenceId: `init-${workspaceId}`,
-            idempotencyKey: trialIdempotencyKey,
-            description: 'Initial 5 Free Trial Credits',
-          },
-        });
+        if (canGrantTrial) {
+          const trialIdempotencyKey = `trial:grant:user:${resolvedUserId}`;
+          const existingTrial = await tx.creditLedger.findUnique({
+            where: { idempotencyKey: trialIdempotencyKey },
+          });
+          if (!existingTrial) {
+            await tx.creditLedger.create({
+              data: {
+                id: `led-trial-${resolvedUserId}`,
+                workspaceId,
+                amount: 5,
+                balanceAfter: 5,
+                type: 'TRIAL_GRANT',
+                referenceId: `init-${workspaceId}`,
+                idempotencyKey: trialIdempotencyKey,
+                description: 'Initial 5 Free Trial Credits',
+              },
+            });
+          }
+          await tx.user.update({
+            where: { id: resolvedUserId },
+            data: { trialGrantedAt: new Date() },
+          });
+        }
       }
 
-      // Lock workspace row now that it exists
       await tx.$queryRaw`SELECT "id" FROM "Workspace" WHERE "id" = ${workspaceId} FOR UPDATE`;
 
       const subRow = await tx.subscription.findUnique({
@@ -208,6 +430,7 @@ export class PostgresCreditLedgerService {
 
       return {
         workspaceId,
+        workspaceName: existingWs.name,
         userId: resolvedUserId,
         email: existingUser.email,
         country: existingWs.country,
@@ -226,7 +449,7 @@ export class PostgresCreditLedgerService {
     });
 
     if (!ws) {
-      return this.ensureWorkspace({ workspaceId });
+      throw new Error(`NOT_FOUND: Workspace ${workspaceId} not found`);
     }
 
     const user = await this.prisma.user.findUnique({
@@ -237,8 +460,9 @@ export class PostgresCreditLedgerService {
 
     return {
       workspaceId: ws.id,
+      workspaceName: ws.name,
       userId: user?.id ?? ws.ownerId,
-      email: user?.email ?? `${ws.ownerId}@merchant.shotistry.app`,
+      email: user?.email ?? '',
       country: ws.country,
       currency: ws.currency,
       planTier: ws.subscription?.planTier ?? 'FREE',
@@ -640,4 +864,3 @@ export class PostgresCreditLedgerService {
     });
   }
 }
-

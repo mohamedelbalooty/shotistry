@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS "User" (
   "role" TEXT NOT NULL DEFAULT 'USER',
   "country" TEXT NOT NULL DEFAULT 'EG',
   "locale" TEXT NOT NULL DEFAULT 'ar',
+  "emailVerifiedAt" TEXT,
+  "trialGrantedAt" TEXT,
+  "passwordUpdatedAt" TEXT,
   "createdAt" TEXT NOT NULL,
   "updatedAt" TEXT NOT NULL
 );
@@ -56,6 +59,28 @@ CREATE TABLE IF NOT EXISTS "WorkspaceMember" (
   FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE,
   FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS "Session" (
+  "id" TEXT PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "activeWorkspaceId" TEXT,
+  "tokenHash" TEXT NOT NULL UNIQUE,
+  "csrfToken" TEXT NOT NULL,
+  "userAgent" TEXT,
+  "ipAddress" TEXT,
+  "createdAt" TEXT NOT NULL,
+  "lastActivityAt" TEXT NOT NULL,
+  "idleExpiresAt" TEXT NOT NULL,
+  "expiresAt" TEXT NOT NULL,
+  "revokedAt" TEXT,
+  "revokedReason" TEXT,
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE,
+  FOREIGN KEY ("activeWorkspaceId") REFERENCES "Workspace"("id") ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS "Session_tokenHash_idx" ON "Session"("tokenHash");
+CREATE INDEX IF NOT EXISTS "Session_userId_idx" ON "Session"("userId");
+CREATE INDEX IF NOT EXISTS "Session_expiresAt_idx" ON "Session"("expiresAt");
 
 CREATE TABLE IF NOT EXISTS "Brand" (
   "id" TEXT PRIMARY KEY,
@@ -249,7 +274,71 @@ CREATE TABLE IF NOT EXISTS "AdminAuditLog" (
   "createdAt" TEXT NOT NULL,
   FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS "AuthActionToken" (
+  "id" TEXT PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "type" TEXT NOT NULL,
+  "tokenHash" TEXT NOT NULL UNIQUE,
+  "targetEmail" TEXT,
+  "expiresAt" TEXT NOT NULL,
+  "consumedAt" TEXT,
+  "revokedAt" TEXT,
+  "createdIp" TEXT,
+  "createdAt" TEXT NOT NULL,
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "AuthActionToken_userId_type_idx" ON "AuthActionToken"("userId", "type");
+CREATE INDEX IF NOT EXISTS "AuthActionToken_expiresAt_idx" ON "AuthActionToken"("expiresAt");
+
+CREATE TABLE IF NOT EXISTS "RateLimitBucket" (
+  "key" TEXT PRIMARY KEY,
+  "count" INTEGER NOT NULL,
+  "windowStart" TEXT NOT NULL,
+  "expiresAt" TEXT NOT NULL,
+  "updatedAt" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "RateLimitBucket_expiresAt_idx" ON "RateLimitBucket"("expiresAt");
+
+CREATE TABLE IF NOT EXISTS "WorkspaceInvite" (
+  "id" TEXT PRIMARY KEY,
+  "workspaceId" TEXT NOT NULL,
+  "invitedEmail" TEXT NOT NULL,
+  "role" TEXT NOT NULL,
+  "invitedByUserId" TEXT NOT NULL,
+  "tokenHash" TEXT NOT NULL UNIQUE,
+  "expiresAt" TEXT NOT NULL,
+  "acceptedAt" TEXT,
+  "acceptedByUserId" TEXT,
+  "revokedAt" TEXT,
+  "createdAt" TEXT NOT NULL,
+  FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE,
+  FOREIGN KEY ("invitedByUserId") REFERENCES "User"("id") ON DELETE CASCADE,
+  FOREIGN KEY ("acceptedByUserId") REFERENCES "User"("id") ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS "WorkspaceInvite_workspaceId_invitedEmail_idx" ON "WorkspaceInvite"("workspaceId", "invitedEmail");
+CREATE INDEX IF NOT EXISTS "WorkspaceInvite_expiresAt_idx" ON "WorkspaceInvite"("expiresAt");
 `;
+
+function ensureSqliteColumnMigrations(db: DatabaseSync): void {
+  const userCols = new Set(
+    (db.prepare(`PRAGMA table_info("User")`).all() as Array<{ name: string }>).map(
+      (col) => col.name
+    )
+  );
+  if (!userCols.has('emailVerifiedAt')) {
+    db.exec(`ALTER TABLE "User" ADD COLUMN "emailVerifiedAt" TEXT;`);
+  }
+  if (!userCols.has('trialGrantedAt')) {
+    db.exec(`ALTER TABLE "User" ADD COLUMN "trialGrantedAt" TEXT;`);
+  }
+  if (!userCols.has('passwordUpdatedAt')) {
+    db.exec(`ALTER TABLE "User" ADD COLUMN "passwordUpdatedAt" TEXT;`);
+  }
+}
 
 function initSqliteDb(dbPath?: string): DatabaseSync {
   const resolvedPath =
@@ -267,6 +356,7 @@ function initSqliteDb(dbPath?: string): DatabaseSync {
     db.exec('PRAGMA busy_timeout = 5000;');
   }
   db.exec(SCHEMA_DDL);
+  ensureSqliteColumnMigrations(db);
   return db;
 }
 
@@ -321,3 +411,4 @@ export async function withSerializableTransaction<T>(
   }
 }
 
+export { resolveDbDriver } from './driver.ts';

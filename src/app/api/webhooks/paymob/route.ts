@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { PaymobSecurity } from '../../../../lib/paymob/paymob-hmac.ts';
 import { SUBSCRIPTION_PLANS, TOP_UP_PACKS } from '../../../../lib/pricing/plans.ts';
 import { CreditLedgerService } from '../../../../lib/ledger/credit-ledger-service.ts';
-import { withSerializableTransaction } from '../../../../lib/db/prisma.ts';
+import { getWebhookRepository } from '../../../../lib/db/repositories/webhook-repository.ts';
 import type { PlanTier } from '../../../../lib/types/index.ts';
 
 function getConfiguredPaymobSecret(): string | null {
@@ -76,6 +76,7 @@ export async function POST(request: Request) {
 
     const payloadHash = crypto.createHash('sha256').update(rawBody).digest('hex');
     const ledger = new CreditLedgerService();
+    const webhookRepo = getWebhookRepository();
 
     // Case 1: Subscription / Recurring Lifecycle Webhook
     if (body?.trigger_type && body?.subscription_data?.id !== undefined) {
@@ -100,9 +101,31 @@ export async function POST(request: Request) {
         body.event_id ||
           `sub:${triggerType}:${paymobSubId}:${subData.billing_cycle || subData.updated_at || '1'}`
       );
-      const workspaceId = String(
-        subData.workspace_id || subData.client_info?.workspace_id || 'ws-default-studio'
-      );
+
+      let workspaceId = String(
+        subData.workspace_id || subData.client_info?.workspace_id || ''
+      ).trim();
+
+      if (!workspaceId) {
+        const found = await webhookRepo.findSubscriptionWorkspace(paymobSubId);
+        workspaceId = found ?? '';
+      }
+
+      if (!workspaceId) {
+        return Response.json(
+          { error: 'Missing workspace_id in verified Paymob subscription webhook' },
+          { status: 400 }
+        );
+      }
+
+      const exists = await webhookRepo.workspaceExists(workspaceId);
+      if (!exists) {
+        return Response.json(
+          { error: `Workspace '${workspaceId}' does not exist` },
+          { status: 404 }
+        );
+      }
+
       const rawTier = String(subData.plan_tier || 'STARTER').toUpperCase();
       const planTier: PlanTier =
         rawTier === 'PRO' || rawTier === 'AGENCY' || rawTier === 'STARTER'
@@ -110,90 +133,16 @@ export async function POST(request: Request) {
           : 'STARTER';
       const currency = String(subData.currency || 'EGP').toUpperCase() === 'SAR' ? 'SAR' : 'EGP';
 
-      await ledger.ensureWorkspace({
+      const outcome = await webhookRepo.processSubscriptionEvent({
+        eventId,
+        payloadHash,
+        rawBody,
+        triggerType,
+        subData,
+        paymobSubId,
         workspaceId,
-        country: currency === 'SAR' ? 'SA' : 'EG',
+        planTier,
         currency,
-      });
-
-      const outcome = await withSerializableTransaction((db) => {
-        const existingEvent = db
-          .prepare(`SELECT "id", "processed" FROM "WebhookEvent" WHERE "eventId" = ?`)
-          .get(eventId) as { id: string; processed: number } | undefined;
-
-        if (existingEvent && existingEvent.processed === 1) {
-          return {
-            duplicate: true,
-            creditsGranted: 0,
-            subscriptionStatus: 'UNCHANGED',
-          };
-        }
-
-        const now = new Date().toISOString();
-        if (!existingEvent) {
-          db.prepare(
-            `INSERT INTO "WebhookEvent" (
-               "id", "source", "eventId", "payloadHash", "payload", "processed", "processedAt", "createdAt"
-             ) VALUES (?, 'PAYMOB', ?, ?, ?, 1, ?, ?)`
-          ).run(`wh-${crypto.randomUUID()}`, eventId, payloadHash, rawBody, now, now);
-        } else {
-          db.prepare(
-            `UPDATE "WebhookEvent" SET "processed" = 1, "processedAt" = ? WHERE "id" = ?`
-          ).run(now, existingEvent.id);
-        }
-
-        const triggerLower = triggerType.toLowerCase();
-        const isGrantTrigger =
-          triggerLower.includes('created') ||
-          triggerLower.includes('renew') ||
-          triggerLower.includes('payment_success') ||
-          triggerLower.includes('activated');
-
-        const isPastDueTrigger =
-          triggerLower.includes('fail') || triggerLower.includes('past_due');
-        const isSuspendedTrigger = triggerLower.includes('suspend');
-        const isCanceledTrigger = triggerLower.includes('cancel');
-
-        let newStatus = 'ACTIVE';
-        if (isPastDueTrigger) newStatus = 'PAST_DUE';
-        else if (isSuspendedTrigger) newStatus = 'SUSPENDED';
-        else if (isCanceledTrigger) newStatus = 'CANCELED';
-
-        const planConfig = SUBSCRIPTION_PLANS[planTier];
-        const monthlyCredits = Number(subData.credits || planConfig.monthlyCredits || 80);
-        const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-        db.prepare(
-          `UPDATE "Subscription"
-           SET "planTier" = ?,
-               "status" = ?,
-               "currency" = ?,
-               "monthlyCredits" = ?,
-               "paymobSubscriptionId" = ?,
-               "currentPeriodStart" = ?,
-               "currentPeriodEnd" = ?,
-               "cancelAtPeriodEnd" = ?,
-               "updatedAt" = ?
-           WHERE "workspaceId" = ?`
-        ).run(
-          planTier,
-          newStatus,
-          currency,
-          monthlyCredits,
-          paymobSubId,
-          now,
-          periodEnd,
-          isCanceledTrigger ? 1 : 0,
-          now,
-          workspaceId
-        );
-
-        return {
-          duplicate: false,
-          shouldGrant: isGrantTrigger,
-          monthlyCredits,
-          subscriptionStatus: newStatus,
-        };
       });
 
       if (outcome.duplicate) {
@@ -266,11 +215,31 @@ export async function POST(request: Request) {
     const paymobTxnId = String(txnObj.id);
     const paymobOrderId = txnObj.order?.id ? String(txnObj.order.id) : null;
     const eventId = String(body.event_id || `txn:${paymobTxnId}`);
-    const workspaceId = String(
-      txnObj.workspace_id ||
-        txnObj.order?.shipping_data?.extra_description ||
-        'ws-default-studio'
-    );
+
+    let workspaceId = String(
+      txnObj.workspace_id || txnObj.order?.shipping_data?.extra_description || ''
+    ).trim();
+
+    if (!workspaceId && paymobOrderId) {
+      const found = await webhookRepo.findTransactionWorkspace(paymobOrderId);
+      workspaceId = found ?? '';
+    }
+
+    if (!workspaceId) {
+      return Response.json(
+        { error: 'Missing workspace_id in verified Paymob transaction webhook' },
+        { status: 400 }
+      );
+    }
+
+    const exists = await webhookRepo.workspaceExists(workspaceId);
+    if (!exists) {
+      return Response.json(
+        { error: `Workspace '${workspaceId}' does not exist` },
+        { status: 404 }
+      );
+    }
+
     const currency = String(txnObj.currency || 'EGP').toUpperCase() === 'SAR' ? 'SAR' : 'EGP';
     const amountCents = Number(txnObj.amount_cents || 0);
     const isSuccess =
@@ -279,73 +248,17 @@ export async function POST(request: Request) {
       !txnObj.is_refunded &&
       !txnObj.error_occured;
 
-    await ledger.ensureWorkspace({
+    const txnState = await webhookRepo.processTransactionEvent({
+      eventId,
+      payloadHash,
+      rawBody,
+      paymobTxnId,
+      paymobOrderId,
       workspaceId,
-      country: currency === 'SAR' ? 'SA' : 'EG',
       currency,
-    });
-
-    const txnState = await withSerializableTransaction((db) => {
-      const existingEvent = db
-        .prepare(`SELECT "id", "processed" FROM "WebhookEvent" WHERE "eventId" = ?`)
-        .get(eventId) as { id: string; processed: number } | undefined;
-
-      if (existingEvent && existingEvent.processed === 1) {
-        return { duplicate: true, transactionStatus: isSuccess ? 'SUCCEEDED' : 'FAILED' };
-      }
-
-      const now = new Date().toISOString();
-      if (!existingEvent) {
-        db.prepare(
-          `INSERT INTO "WebhookEvent" (
-             "id", "source", "eventId", "payloadHash", "payload", "processed", "processedAt", "createdAt"
-           ) VALUES (?, 'PAYMOB', ?, ?, ?, 1, ?, ?)`
-        ).run(`wh-${crypto.randomUUID()}`, eventId, payloadHash, rawBody, now, now);
-      } else {
-        db.prepare(
-          `UPDATE "WebhookEvent" SET "processed" = 1, "processedAt" = ? WHERE "id" = ?`
-        ).run(now, existingEvent.id);
-      }
-
-      const status = isSuccess ? 'SUCCEEDED' : 'FAILED';
-      const existingTxn = paymobOrderId
-        ? (db
-            .prepare(`SELECT "id" FROM "PaymentTransaction" WHERE "paymobOrderId" = ?`)
-            .get(paymobOrderId) as { id: string } | undefined)
-        : undefined;
-
-      if (existingTxn) {
-        db.prepare(
-          `UPDATE "PaymentTransaction"
-           SET "paymobTxnId" = ?, "status" = ?, "errorMessage" = ?
-           WHERE "id" = ?`
-        ).run(
-          paymobTxnId,
-          status,
-          isSuccess ? null : 'Transaction reported success=false',
-          existingTxn.id
-        );
-      } else {
-        db.prepare(
-          `INSERT OR IGNORE INTO "PaymentTransaction" (
-             "id", "workspaceId", "amountCents", "currency", "paymobOrderId",
-             "paymobTxnId", "paymentMethod", "status", "errorMessage", "createdAt"
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          `pt-${crypto.randomUUID()}`,
-          workspaceId,
-          amountCents,
-          currency,
-          paymobOrderId,
-          paymobTxnId,
-          txnObj.source_data?.sub_type || txnObj.source_data?.type || 'card',
-          status,
-          isSuccess ? null : 'Transaction reported success=false',
-          now
-        );
-      }
-
-      return { duplicate: false, transactionStatus: status };
+      amountCents,
+      paymentMethod: txnObj.source_data?.sub_type || txnObj.source_data?.type || 'card',
+      isSuccess,
     });
 
     if (txnState.duplicate) {
@@ -376,14 +289,7 @@ export async function POST(request: Request) {
       }
 
       if (inferred.planTier) {
-        const targetPlanTier = inferred.planTier;
-        await withSerializableTransaction((db) => {
-          db.prepare(
-            `UPDATE "Subscription"
-             SET "planTier" = ?, "status" = 'ACTIVE', "monthlyCredits" = ?, "updatedAt" = ?
-             WHERE "workspaceId" = ?`
-          ).run(targetPlanTier, inferred.credits, new Date().toISOString(), workspaceId);
-        });
+        await webhookRepo.updateSubscriptionPlan(workspaceId, inferred.planTier, inferred.credits);
       }
     }
 

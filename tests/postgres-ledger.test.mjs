@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PostgresCreditLedgerService } from '../src/lib/ledger/postgres-ledger-service.ts';
+import { runPgMigrations } from './helpers/pg-migrate.mjs';
 
 const PG_ADMIN_URL =
   process.env.POSTGRES_ADMIN_URL ||
@@ -45,38 +46,17 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
 
       await prisma.$queryRaw`SELECT 1`;
 
-      // Apply prisma/migrations/20261105000000_init/migration.sql if not yet applied
-      const existingTables = await prisma.$queryRaw`
-        SELECT table_name
-        FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'CreditLedger'
-      `;
-
-      if (!Array.isArray(existingTables) || existingTables.length === 0) {
-        const migrationPath = path.resolve(
-          'prisma/migrations/20261105000000_init/migration.sql'
-        );
-        const migrationSql = fs.readFileSync(migrationPath, 'utf8');
-        const statements = migrationSql
-          .split(';')
-          .map((s) =>
-            s
-              .split('\n')
-              .filter((line) => !line.trim().startsWith('--'))
-              .join('\n')
-              .trim()
-          )
-          .filter((s) => s.length > 0);
-
-        for (const stmt of statements) {
-          await prisma.$executeRawUnsafe(stmt);
-        }
-      }
+      // Apply all migrations via helper
+      await runPgMigrations(prisma, { reset: false });
 
       pgReachable = true;
       ledger = new PostgresCreditLedgerService(prisma);
 
       // Clean isolated test rows before suite execution
+      await prisma.authActionToken.deleteMany({});
+      await prisma.rateLimitBucket.deleteMany({});
+      await prisma.workspaceInvite.deleteMany({});
+      await prisma.session.deleteMany({});
       await prisma.adminAuditLog.deleteMany({});
       await prisma.webhookEvent.deleteMany({});
       await prisma.paymentTransaction.deleteMany({});
@@ -109,7 +89,7 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
     }
   });
 
-  test('verifies all 17 Prisma PostgreSQL tables and 7 PostgreSQL enum types are migrated in PostgreSQL', async (t) => {
+  test('verifies all 21 application PostgreSQL tables, _prisma_migrations, and 9 PostgreSQL enum types are migrated in PostgreSQL', async (t) => {
     if (!pgReachable) {
       if (process.env.REQUIRE_POSTGRES_TESTS === '1') {
         assert.fail(`PostgreSQL connection required but failed: ${pgConnectError?.message}`);
@@ -128,6 +108,7 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
 
     const expectedTables = [
       'AdminAuditLog',
+      'AuthActionToken',
       'Brand',
       'CreditLedger',
       'CreditReservation',
@@ -139,11 +120,15 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
       'ProductAsset',
       'PromptTemplate',
       'PromptVersion',
+      'RateLimitBucket',
+      'Session',
       'Subscription',
       'User',
       'WebhookEvent',
       'Workspace',
+      'WorkspaceInvite',
       'WorkspaceMember',
+      '_prisma_migrations',
     ];
 
     for (const expected of expectedTables) {
@@ -158,6 +143,7 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
     `;
     const enumNames = enums.map((e) => e.typname);
     for (const expectedEnum of [
+      'AuthActionTokenType',
       'Currency',
       'JobStatus',
       'LedgerTransactionType',
@@ -165,6 +151,7 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
       'ReservationStatus',
       'Role',
       'SubscriptionStatus',
+      'WorkspaceRole',
     ]) {
       assert.ok(
         enumNames.includes(expectedEnum),

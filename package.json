@@ -2,13 +2,18 @@
   "name": "shotistry",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:pg": "REQUIRE_POSTGRES_TESTS=1 SHOTISTRY_DB_DRIVER=postgres node --experimental-strip-types --test tests/postgres-*.test.mjs",
+    "seed": "node --experimental-strip-types scripts/seed-test-accounts.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",

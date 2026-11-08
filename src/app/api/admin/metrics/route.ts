@@ -1,205 +1,39 @@
-import { getDb } from '../../../../lib/db/prisma.ts';
-import { SUBSCRIPTION_PLANS } from '../../../../lib/pricing/plans.ts';
+import { resolveAuthenticatedSession } from '../../../../lib/auth/session.ts';
+import { requirePlatformPermission } from '../../../../lib/auth/rbac.ts';
+import { getAdminRepository } from '../../../../lib/db/repositories/admin-repository.ts';
 import {
-  MODEL_PRICING_CATALOG,
-  calculateModelGenerationCost,
-} from '../../../../lib/pricing/model-costs.ts';
-import type {
-  GeminiImageModelId,
-  GeminiImageSize,
-  PlanTier,
-} from '../../../../lib/types/index.ts';
-
-function resolveModelId(rawModel: unknown): GeminiImageModelId {
-  const candidate = String(rawModel || 'gemini-3.1-flash-image') as GeminiImageModelId;
-  return candidate in MODEL_PRICING_CATALOG ? candidate : 'gemini-3.1-flash-image';
-}
-
-function resolveImageSize(rawResolution: unknown): GeminiImageSize {
-  const res = String(rawResolution || '').toUpperCase();
-  if (res.includes('4K') || res.includes('4096')) return '4K';
-  if (res.includes('2K') || res.includes('2048')) return '2K';
-  if (res.includes('512')) return '512';
-  return '1K';
-}
-
-function isAuthorizedAdmin(request: Request): boolean {
-  const roleHeader = request.headers.get('x-user-role')?.trim().toUpperCase();
-  if (roleHeader && roleHeader !== 'ADMIN' && roleHeader !== 'SUPPORT') {
-    return false;
-  }
-  return true;
-}
+  enforceRateLimitPolicies,
+  getRateLimiterStatus,
+} from '../../../../lib/security/rate-limit.ts';
 
 export async function GET(request: Request) {
-  if (!isAuthorizedAdmin(request)) {
-    return Response.json(
-      { error: 'FORBIDDEN: Admin or Support role required' },
-      { status: 403 }
+  try {
+    const session = await resolveAuthenticatedSession(request);
+    requirePlatformPermission(session, 'platform:metrics:read');
+
+    const rateBlocked = await enforceRateLimitPolicies(
+      request,
+      'admin:metrics:actor',
+      { userId: session.userId }
     );
+    if (rateBlocked) return rateBlocked;
+
+    const adminRepo = getAdminRepository();
+    const metrics = await adminRepo.getPlatformMetrics();
+
+    return Response.json({
+      ...metrics,
+      infrastructure: {
+        rateLimiter: getRateLimiterStatus(),
+      },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch platform metrics';
+    const status = message.startsWith('UNAUTHORIZED:')
+      ? 401
+      : message.startsWith('FORBIDDEN:')
+        ? 403
+        : 500;
+    return Response.json({ error: message }, { status });
   }
-
-  const db = getDb();
-
-  const userCountRow = db
-    .prepare(`SELECT COUNT(*) AS count FROM "User"`)
-    .get() as { count: number };
-  const totalUsers = Number(userCountRow?.count ?? 0);
-
-  const activeSubs = db
-    .prepare(
-      `SELECT "planTier", "currency"
-       FROM "Subscription"
-       WHERE "status" = 'ACTIVE' AND "planTier" != 'FREE'`
-    )
-    .all() as Array<{ planTier: string; currency: string }>;
-
-  const payingSubscribers = activeSubs.length;
-
-  let mrrSar = 0;
-  let mrrEgp = 0;
-  for (const sub of activeSubs) {
-    const tier = sub.planTier as PlanTier;
-    const plan = SUBSCRIPTION_PLANS[tier];
-    if (!plan) continue;
-    if (sub.currency === 'SAR') {
-      mrrSar += plan.priceSAR;
-    } else {
-      mrrEgp += plan.priceEGP;
-    }
-  }
-
-  // Exchange rates: 1 USD = 3.75 SAR, 1 USD = 50.0 EGP
-  const mrrUsd = Number((mrrSar / 3.75 + mrrEgp / 50.0).toFixed(2));
-
-  const jobStats = db
-    .prepare(
-      `SELECT
-         COUNT(*) AS totalJobs,
-         SUM(CASE WHEN "status" = 'COMPLETED' THEN 1 ELSE 0 END) AS completedJobs
-       FROM "GenerationJob"`
-    )
-    .get() as { totalJobs: number; completedJobs: number | null };
-
-  const totalJobs = Number(jobStats?.totalJobs ?? 0);
-  const completedJobs = Number(jobStats?.completedJobs ?? 0);
-
-  const imgCountRow = db
-    .prepare(`SELECT COUNT(*) AS count FROM "GeneratedImage"`)
-    .get() as { count: number };
-  const totalImagesGenerated = Number(imgCountRow?.count ?? 0);
-
-  const generationSuccessRate =
-    totalJobs > 0 ? Number(((completedJobs / totalJobs) * 100).toFixed(1)) : 0;
-
-  const generatedImageRows = db
-    .prepare(
-      `SELECT gi."resolution", j."modelUsed"
-       FROM "GeneratedImage" gi
-       LEFT JOIN "GenerationJob" j ON j."id" = gi."generationJobId"`
-    )
-    .all() as Array<{ resolution?: string; modelUsed?: string }>;
-
-  let rawAiExpensesUsd = 0;
-  for (const imgRow of generatedImageRows) {
-    const modelId = resolveModelId(imgRow.modelUsed);
-    const imageSize = resolveImageSize(imgRow.resolution);
-    rawAiExpensesUsd += calculateModelGenerationCost(
-      modelId,
-      imageSize,
-      'standard'
-    ).actualCostPerSuccessfulImageUsd;
-  }
-
-  const aiExpensesUsd = Number(rawAiExpensesUsd.toFixed(4));
-  const grossMarginPercent =
-    mrrUsd > 0
-      ? Number((((mrrUsd - aiExpensesUsd) / mrrUsd) * 100).toFixed(1))
-      : 0;
-
-  const rawRecentJobs = db
-    .prepare(
-      `SELECT j."id",
-              j."status",
-              j."modelUsed",
-              j."startedAt",
-              j."completedAt",
-              j."createdAt",
-              gi."resolution" AS "resolution",
-              p."title" AS "product",
-              p."stylePreset" AS "preset",
-              u."email" AS "userEmail"
-       FROM "GenerationJob" j
-       JOIN "Photoshoot" p ON p."id" = j."photoshootId"
-       JOIN "Workspace" w ON w."id" = p."workspaceId"
-       LEFT JOIN "User" u ON u."id" = w."ownerId"
-       LEFT JOIN "GeneratedImage" gi ON gi."generationJobId" = j."id"
-       ORDER BY j."createdAt" DESC
-       LIMIT 20`
-    )
-    .all() as Array<Record<string, unknown>>;
-
-  const recentJobs = rawRecentJobs.map((row) => {
-    const isCompleted = row.status === 'COMPLETED';
-    const modelId = resolveModelId(row.modelUsed);
-    const imageSize = resolveImageSize(row.resolution);
-    const jobCostUsd = calculateModelGenerationCost(
-      modelId,
-      imageSize,
-      'standard'
-    ).actualCostPerSuccessfulImageUsd;
-    return {
-      id: String(row.id),
-      product: String(row.product || 'Commercial Product'),
-      preset: String(row.preset || 'gulf_luxury_marble'),
-      model: modelId,
-      status: isCompleted ? 'SUCCESS' : String(row.status),
-      cost: isCompleted ? `$${jobCostUsd.toFixed(4)}` : '$0.0000 (Refunded)',
-      user: String(row.userEmail || 'merchant@shotistry.app'),
-      createdAt: String(row.createdAt),
-    };
-  });
-
-  const recentAuditLogs = db
-    .prepare(
-      `SELECT "id", "userId", "action", "targetId", "details", "createdAt"
-       FROM "AdminAuditLog"
-       ORDER BY "createdAt" DESC
-       LIMIT 10`
-    )
-    .all();
-
-  const geminiKey = process.env.GEMINI_API_KEY?.trim() || '';
-  const isGeminiLive =
-    geminiKey.length > 10 &&
-    !geminiKey.includes('Placeholder') &&
-    !geminiKey.includes('your_gemini');
-
-  const paymobSecret = process.env.PAYMOB_HMAC_SECRET?.trim() || '';
-  const isPaymobConfigured =
-    paymobSecret.length >= 8 &&
-    !paymobSecret.includes('placeholder') &&
-    !paymobSecret.includes('your_paymob');
-
-  return Response.json({
-    totalUsers,
-    payingSubscribers,
-    mrrUsd,
-    mrrSar,
-    mrrEgp,
-    grossMarginPercent,
-    aiExpensesUsd,
-    generationSuccessRate,
-    totalImagesGenerated,
-    recentJobs,
-    recentAuditLogs,
-    systemStatus: {
-      geminiEngine: isGeminiLive ? 'LIVE_API_CONFIGURED' : 'SANDBOX_COMPOSITE',
-      paymobGateways: isPaymobConfigured
-        ? 'HMAC_CONFIGURED'
-        : 'UNCONFIGURED_FAIL_CLOSED',
-      database: 'OPERATIONAL_ACID_SQL',
-      storage: 'OPERATIONAL_SIGNED_URLS',
-    },
-  });
 }

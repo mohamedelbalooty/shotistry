@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { PrismaClient } from '@prisma/client';
 import { getDb, withSerializableTransaction } from '../db/prisma.ts';
+import { resolveDbDriver } from '../db/driver.ts';
 import { PostgresCreditLedgerService } from './postgres-ledger-service.ts';
 
 export interface WorkspaceProvisionInput {
@@ -15,8 +16,31 @@ export interface WorkspaceProvisionInput {
   currency?: 'EGP' | 'SAR' | 'USD';
 }
 
+export interface RegisterMerchantInput {
+  email: string;
+  passwordHash: string;
+  name?: string;
+  phone?: string;
+  country?: 'EG' | 'SA';
+  locale?: 'ar' | 'en';
+  workspaceName?: string;
+}
+
+export interface PublicUserRecord {
+  id: string;
+  email: string;
+  name: string | null;
+  phone: string | null;
+  role: 'USER' | 'ADMIN' | 'SUPPORT';
+  country: string;
+  locale: string;
+  emailVerified: boolean;
+  createdAt: string;
+}
+
 export interface WorkspaceBalanceSummary {
   workspaceId: string;
+  workspaceName?: string;
   userId: string;
   email: string;
   country: string;
@@ -53,7 +77,7 @@ export class CreditLedgerService {
   constructor(prismaClient?: PrismaClient) {
     if (
       prismaClient ||
-      (process.env.SHOTISTRY_DB_DRIVER === 'postgres' &&
+      (resolveDbDriver() === 'postgres' &&
         process.env.DATABASE_URL?.startsWith('postgres'))
     ) {
       this.pgDelegate = new PostgresCreditLedgerService(prismaClient);
@@ -85,8 +109,185 @@ export class CreditLedgerService {
   }
 
   /**
-   * Idempotently ensures User, Workspace, WorkspaceMember, Subscription, and
-   * initial 5-credit free trial grant exist in SQL persistence.
+   * Atomically registers a new merchant account (`role = 'USER'`), initial Workspace,
+   * `OWNER` membership, `FREE` Subscription, and a single one-time 5-credit free trial grant.
+   */
+  public async registerMerchantWithInitialWorkspace(
+    input: RegisterMerchantInput
+  ): Promise<{
+    user: PublicUserRecord;
+    workspace: WorkspaceBalanceSummary;
+    trialGranted: boolean;
+  }> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.registerMerchantWithInitialWorkspace(input);
+    }
+
+    const email = input.email.trim().toLowerCase();
+    const country: 'EG' | 'SA' = input.country === 'SA' ? 'SA' : 'EG';
+    const currency: 'EGP' | 'SAR' = country === 'SA' ? 'SAR' : 'EGP';
+    const locale = input.locale === 'en' ? 'en' : 'ar';
+    const name = input.name?.trim() || null;
+    const phone = input.phone?.trim() || null;
+    const workspaceName =
+      input.workspaceName?.trim() ||
+      (name ? `${name} Studio` : 'Merchant Studio');
+
+    return withSerializableTransaction((db) => {
+      const existing = db
+        .prepare(`SELECT "id" FROM "User" WHERE LOWER("email") = LOWER(?)`)
+        .get(email) as { id: string } | undefined;
+
+      if (existing) {
+        throw new Error('CONFLICT: Account with this email already exists');
+      }
+
+      const now = new Date().toISOString();
+      const userId = `user-${crypto.randomUUID()}`;
+      const workspaceId = `ws-${crypto.randomUUID()}`;
+      const slug = `${workspaceName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'studio'}-${crypto.randomBytes(4).toString('hex')}`;
+
+      db.prepare(
+        `INSERT INTO "User" (
+           "id", "email", "name", "phone", "passwordHash", "role", "country", "locale",
+           "emailVerifiedAt", "trialGrantedAt", "passwordUpdatedAt", "createdAt", "updatedAt"
+         ) VALUES (?, ?, ?, ?, ?, 'USER', ?, ?, NULL, ?, ?, ?, ?)`
+      ).run(userId, email, name, phone, input.passwordHash, country, locale, now, now, now, now);
+
+      db.prepare(
+        `INSERT INTO "Workspace" (
+           "id", "name", "slug", "ownerId", "country", "currency", "createdAt", "updatedAt"
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(workspaceId, workspaceName, slug, userId, country, currency, now, now);
+
+      db.prepare(
+        `INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "createdAt")
+         VALUES (?, ?, ?, 'OWNER', ?)`
+      ).run(`wm-${crypto.randomUUID()}`, workspaceId, userId, now);
+
+      const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      db.prepare(
+        `INSERT INTO "Subscription" (
+           "id", "workspaceId", "planTier", "status", "currency", "monthlyCredits",
+           "currentPeriodStart", "currentPeriodEnd", "cancelAtPeriodEnd", "createdAt", "updatedAt"
+         ) VALUES (?, ?, 'FREE', 'ACTIVE', ?, 5, ?, ?, 0, ?, ?)`
+      ).run(`sub-${workspaceId}`, workspaceId, currency, now, periodEnd, now, now);
+
+      const trialIdempotencyKey = `trial:grant:user:${userId}`;
+      db.prepare(
+        `INSERT INTO "CreditLedger" (
+           "id", "workspaceId", "amount", "balanceAfter", "type", "referenceId", "idempotencyKey", "description", "createdAt"
+         ) VALUES (?, ?, 5, 5, 'TRIAL_GRANT', ?, ?, 'Initial 5 Free Trial Credits', ?)`
+      ).run(`led-trial-${userId}`, workspaceId, `init-${workspaceId}`, trialIdempotencyKey, now);
+
+      return {
+        user: {
+          id: userId,
+          email,
+          name,
+          phone,
+          role: 'USER',
+          country,
+          locale,
+          emailVerified: false,
+          createdAt: now,
+        },
+        workspace: {
+          workspaceId,
+          workspaceName,
+          userId,
+          email,
+          country,
+          currency,
+          planTier: 'FREE',
+          subscriptionStatus: 'ACTIVE',
+          settledBalance: 5,
+          reservedCredits: 0,
+          availableCredits: 5,
+        },
+        trialGranted: true,
+      };
+    });
+  }
+
+  /**
+   * Creates an additional workspace owned by an already authenticated user.
+   * Grants 0 trial credits to prevent trial-credit farming across multiple workspaces.
+   */
+  public async createAdditionalWorkspaceForUser(input: {
+    userId: string;
+    workspaceName: string;
+    country?: 'EG' | 'SA';
+  }): Promise<WorkspaceBalanceSummary> {
+    if (this.pgDelegate) {
+      return this.pgDelegate.createAdditionalWorkspaceForUser(input);
+    }
+
+    const country: 'EG' | 'SA' = input.country === 'SA' ? 'SA' : 'EG';
+    const currency: 'EGP' | 'SAR' = country === 'SA' ? 'SAR' : 'EGP';
+    const workspaceName = input.workspaceName.trim();
+
+    if (!workspaceName) {
+      throw new Error('Workspace name is required');
+    }
+
+    return withSerializableTransaction((db) => {
+      const user = db
+        .prepare(`SELECT "id", "email" FROM "User" WHERE "id" = ?`)
+        .get(input.userId) as { id: string; email: string } | undefined;
+
+      if (!user) {
+        throw new Error(`NOT_FOUND: User ${input.userId} not found`);
+      }
+
+      const now = new Date().toISOString();
+      const workspaceId = `ws-${crypto.randomUUID()}`;
+      const slug = `${workspaceName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'studio'}-${crypto.randomBytes(4).toString('hex')}`;
+
+      db.prepare(
+        `INSERT INTO "Workspace" (
+           "id", "name", "slug", "ownerId", "country", "currency", "createdAt", "updatedAt"
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(workspaceId, workspaceName, slug, user.id, country, currency, now, now);
+
+      db.prepare(
+        `INSERT INTO "WorkspaceMember" ("id", "workspaceId", "userId", "role", "createdAt")
+         VALUES (?, ?, ?, 'OWNER', ?)`
+      ).run(`wm-${crypto.randomUUID()}`, workspaceId, user.id, now);
+
+      const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      db.prepare(
+        `INSERT INTO "Subscription" (
+           "id", "workspaceId", "planTier", "status", "currency", "monthlyCredits",
+           "currentPeriodStart", "currentPeriodEnd", "cancelAtPeriodEnd", "createdAt", "updatedAt"
+         ) VALUES (?, ?, 'FREE', 'ACTIVE', ?, 0, ?, ?, 0, ?, ?)`
+      ).run(`sub-${workspaceId}`, workspaceId, currency, now, periodEnd, now, now);
+
+      return {
+        workspaceId,
+        workspaceName,
+        userId: user.id,
+        email: user.email,
+        country,
+        currency,
+        planTier: 'FREE',
+        subscriptionStatus: 'ACTIVE',
+        settledBalance: 0,
+        reservedCredits: 0,
+        availableCredits: 0,
+      };
+    });
+  }
+
+  /**
+   * Explicitly provisions a User + Workspace fixture for trusted server/test usage.
+   * Rejects missing explicit IDs and refuses to create ADMIN/SUPPORT accounts.
    */
   public async ensureWorkspace(
     input: WorkspaceProvisionInput = {}
@@ -94,12 +295,20 @@ export class CreditLedgerService {
     if (this.pgDelegate) {
       return this.pgDelegate.ensureWorkspace(input);
     }
-    const userId = input.userId ?? 'user-default-merchant';
-    const email = input.email ?? `${userId}@merchant.shotistry.app`;
+
+    const userId = input.userId?.trim();
+    const workspaceId = input.workspaceId?.trim();
+    if (!userId || !workspaceId) {
+      throw new Error('userId and workspaceId are required for explicit workspace provisioning');
+    }
+
+    if (input.role && input.role !== 'USER') {
+      throw new Error('FORBIDDEN: Privileged platform roles cannot be provisioned via ensureWorkspace');
+    }
+
+    const email = (input.email ?? `${userId}@merchant.shotistry.app`).trim().toLowerCase();
     const userName = input.userName ?? 'Shotistry Merchant';
-    const role = input.role ?? 'USER';
-    const workspaceId = input.workspaceId ?? 'ws-default-studio';
-    const workspaceName = input.workspaceName ?? 'Default Studio Workspace';
+    const workspaceName = input.workspaceName ?? 'Studio Workspace';
     const country = input.country ?? 'EG';
     const currency = input.currency ?? (country === 'SA' ? 'SAR' : 'EGP');
 
@@ -107,21 +316,25 @@ export class CreditLedgerService {
       const now = new Date().toISOString();
 
       const existingUser = db
-        .prepare(`SELECT "id", "email" FROM "User" WHERE "id" = ? OR "email" = ?`)
-        .get(userId, email) as { id: string; email: string } | undefined;
+        .prepare(`SELECT "id", "email", "trialGrantedAt" FROM "User" WHERE "id" = ? OR LOWER("email") = LOWER(?)`)
+        .get(userId, email) as
+        | { id: string; email: string; trialGrantedAt: string | null }
+        | undefined;
 
       const resolvedUserId = existingUser ? existingUser.id : userId;
 
       if (!existingUser) {
         db.prepare(
           `INSERT INTO "User" ("id", "email", "name", "role", "country", "locale", "createdAt", "updatedAt")
-           VALUES (?, ?, ?, ?, ?, 'ar', ?, ?)`
-        ).run(resolvedUserId, email, userName, role, country, now, now);
+           VALUES (?, ?, ?, 'USER', ?, 'ar', ?, ?)`
+        ).run(resolvedUserId, email, userName, country, now, now);
       }
 
       const existingWs = db
-        .prepare(`SELECT "id", "country", "currency" FROM "Workspace" WHERE "id" = ?`)
-        .get(workspaceId) as { id: string; country: string; currency: string } | undefined;
+        .prepare(`SELECT "id", "name", "country", "currency" FROM "Workspace" WHERE "id" = ?`)
+        .get(workspaceId) as
+        | { id: string; name: string; country: string; currency: string }
+        | undefined;
 
       if (!existingWs) {
         const slug = `${workspaceId.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
@@ -135,27 +348,45 @@ export class CreditLedgerService {
            VALUES (?, ?, ?, 'OWNER', ?)`
         ).run(`wm-${workspaceId}-${resolvedUserId}`, workspaceId, resolvedUserId, now);
 
+        const canGrantTrial = !existingUser?.trialGrantedAt;
         const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         db.prepare(
           `INSERT OR IGNORE INTO "Subscription" (
              "id", "workspaceId", "planTier", "status", "currency", "monthlyCredits",
              "currentPeriodStart", "currentPeriodEnd", "cancelAtPeriodEnd", "createdAt", "updatedAt"
-           ) VALUES (?, ?, 'FREE', 'ACTIVE', ?, 5, ?, ?, 0, ?, ?)`
-        ).run(`sub-${workspaceId}`, workspaceId, currency, now, periodEnd, now, now);
-
-        // Grant initial 5 free trial credits idempotently
-        const trialIdempotencyKey = `trial:grant:${workspaceId}`;
-        db.prepare(
-          `INSERT OR IGNORE INTO "CreditLedger" (
-             "id", "workspaceId", "amount", "balanceAfter", "type", "referenceId", "idempotencyKey", "description", "createdAt"
-           ) VALUES (?, ?, 5, 5, 'TRIAL_GRANT', ?, ?, 'Initial 5 Free Trial Credits', ?)`
+           ) VALUES (?, ?, 'FREE', 'ACTIVE', ?, ?, ?, ?, 0, ?, ?)`
         ).run(
-          `led-trial-${workspaceId}`,
+          `sub-${workspaceId}`,
           workspaceId,
-          `init-${workspaceId}`,
-          trialIdempotencyKey,
+          currency,
+          canGrantTrial ? 5 : 0,
+          now,
+          periodEnd,
+          now,
           now
         );
+
+        if (canGrantTrial) {
+          const trialIdempotencyKey = `trial:grant:user:${resolvedUserId}`;
+          const trialRes = db.prepare(
+            `INSERT OR IGNORE INTO "CreditLedger" (
+               "id", "workspaceId", "amount", "balanceAfter", "type", "referenceId", "idempotencyKey", "description", "createdAt"
+             ) VALUES (?, ?, 5, 5, 'TRIAL_GRANT', ?, ?, 'Initial 5 Free Trial Credits', ?)`
+          ).run(
+            `led-trial-${resolvedUserId}`,
+            workspaceId,
+            `init-${workspaceId}`,
+            trialIdempotencyKey,
+            now
+          );
+          if (trialRes.changes > 0) {
+            db.prepare(`UPDATE "User" SET "trialGrantedAt" = ?, "updatedAt" = ? WHERE "id" = ?`).run(
+              now,
+              now,
+              resolvedUserId
+            );
+          }
+        }
       }
 
       const subRow = db
@@ -166,6 +397,7 @@ export class CreditLedgerService {
 
       return {
         workspaceId,
+        workspaceName: existingWs?.name ?? workspaceName,
         userId: resolvedUserId,
         email: existingUser?.email ?? email,
         country: existingWs?.country ?? country,
@@ -183,13 +415,13 @@ export class CreditLedgerService {
     }
     const db = getDb();
     const ws = db
-      .prepare(`SELECT "id", "ownerId", "country", "currency" FROM "Workspace" WHERE "id" = ?`)
+      .prepare(`SELECT "id", "name", "ownerId", "country", "currency" FROM "Workspace" WHERE "id" = ?`)
       .get(workspaceId) as
-      | { id: string; ownerId: string; country: string; currency: string }
+      | { id: string; name: string; ownerId: string; country: string; currency: string }
       | undefined;
 
     if (!ws) {
-      return this.ensureWorkspace({ workspaceId });
+      throw new Error(`NOT_FOUND: Workspace ${workspaceId} not found`);
     }
 
     const user = db
@@ -204,8 +436,9 @@ export class CreditLedgerService {
 
     return {
       workspaceId: ws.id,
+      workspaceName: ws.name,
       userId: user?.id ?? ws.ownerId,
-      email: user?.email ?? `${ws.ownerId}@merchant.shotistry.app`,
+      email: user?.email ?? '',
       country: ws.country,
       currency: ws.currency,
       planTier: sub?.planTier ?? 'FREE',
@@ -671,4 +904,3 @@ export class CreditLedgerService {
     });
   }
 }
-

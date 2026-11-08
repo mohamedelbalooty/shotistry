@@ -3,6 +3,61 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2026-11-08 (Authentication Security Hardening, PostgreSQL 16 CI Gate, Distributed Rate Limiting & Action Tokens)
+### Added
+- **Dual-Driver Database Repositories (Phase 1):**
+  - Implemented `AuthRepository`, `WorkspaceRepository`, `WebhookRepository`, and `AdminRepository` with full dual-driver parity for SQLite (`node:sqlite`) and PostgreSQL (`@prisma/client`).
+  - Added strict static architecture guard (`tests/repositories.test.mjs`) ensuring zero application routes or auth modules import low-level database primitives directly.
+- **Native Node 24 Argon2id Password Hashing & Concurrency Semaphore (Phase 2):**
+  - Upgraded password hashing from sub-standard scrypt to native Node.js 24 Argon2id (`crypto.argon2('argon2id')`, `m=19456`, `t=2`, `p=1`, `tagLength=32`, `salt=16 bytes`) conforming to OWASP RFC 9106 standards.
+  - Implemented asynchronous concurrency semaphore (`SHOTISTRY_MAX_CONCURRENT_HASHES=4`) to prevent serverless OOM, failing closed gracefully with HTTP `503 SERVICE_BUSY` when overloaded.
+  - Added bounded parameter validation and transparent login re-hashing from legacy scrypt.
+- **Fail-Closed Distributed Rate Limiting (Phase 3):**
+  - Implemented `UpstashRateLimitStore` executing atomic Lua scripts via REST, and `PostgresRateLimitStore` backed by ACID `RateLimitBucket` table.
+  - Added client IP extraction with trusted proxy filtering (`SHOTISTRY_TRUSTED_PROXY_COUNT`), IPv6 `/64` CIDR grouping, PII-free SHA-256 hashed keys, and fail-closed `503 RATE_LIMITER_UNAVAILABLE` in production.
+- **Transactional Email Transport & Bilingual Templates (Phase 4):**
+  - Added `ResendEmailTransport` (outbound HTTPS to `https://api.resend.com/emails`) and `MemoryEmailTransport` for test/offline use.
+  - Added bilingual (`ar`/`en`) RTL/LTR email templates for verification, password reset, email change, password changed notice, and workspace invitations with strict HTML sanitization.
+- **Single-Use Action Token Lifecycle & Verified-Email Gating (Phase 5 & 7):**
+  - Added `AuthActionToken` table and repository (`EMAIL_VERIFY`, `PASSWORD_RESET`, `EMAIL_CHANGE`) with atomic single-use SQL consumption.
+  - Implemented ADR-007 verified-email gating (`requireVerifiedEmail`) blocking commercial checkout, workspace creation, and member invites for unverified users with HTTP `403 EMAIL_VERIFICATION_REQUIRED`.
+- **Hardened Account Recovery & Token-Leakage Mitigation (Phase 6):**
+  - Created `/api/auth/forgot-password` with anti-enumeration uniform `202 Accepted` response, ~50 ms constant-time floor padding, and privileged role (`ADMIN`, `SUPPORT`) exclusion with `PRIVILEGED_RESET_ATTEMPT` audit logging.
+  - Created `/api/auth/reset-password` pre-validating password strength before token consumption, revoking all active sessions (`PASSWORD_RESET`), invalidating outstanding tokens, and clearing session cookies.
+  - Created `next.config.ts` enforcing `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and strict `no-referrer` + `no-store` on all token-handling paths.
+- **Identity-Bound Workspace Invites & Frontend UI (Phase 7):**
+  - Added `WorkspaceInvite` table, repository, and invite acceptance route (`POST /api/workspaces/invites/accept`) enforcing strict identity matching `session.email === invite.invitedEmail`.
+  - Created bilingual RTL/LTR frontend pages: `/verify-email`, `/forgot-password`, `/reset-password`, `/invites/accept`, and `/account/confirm-email`, reading `#token=` from URL fragments and immediately scrubbing via `window.history.replaceState`.
+- **PostgreSQL 16 Verification Suite & CI Gate (Phase 8):**
+  - Added `tests/helpers/pg-migrate.mjs` applying all 3 migrations (`20261105000000_init`, `20261108000000_sessions_rbac`, `20261109000000_auth_security_hardening`) with PostgreSQL advisory locks and test database safety guards (`_test` name assertion).
+  - Added `tests/postgres-auth.test.mjs` and `"test:pg"` npm script. Verified all 14 PostgreSQL tests green on live `PostgreSQL 16.15`.
+- **Actor Taxonomy Cleanup & Documentation Sync (Phase 9):**
+  - Replaced abbreviated `CLIOP` with readable `CLI_OPERATOR` across all diagrams and prose.
+  - Reclassified `EXT_SIGNED_ASSET_BEARER` under a dedicated Signed-Capability Bearer category, and clearly separated internal `SYS_*` subsystems from external system actors.
+  - Synchronized all security, architecture, operations, QA, and project status documentation.
+
+## [0.3.0] - 2026-11-08 (System Actors, Multi-Tier RBAC & Option A Session Security)
+### Added
+- **Option A — Database-Backed Opaque Session Architecture (`src/lib/auth/session.ts`, `prisma/schema.prisma`, `prisma/migrations/20261108000000_sessions_rbac/migration.sql`):**
+  - Added `Session` model and `WorkspaceRole` enum (`OWNER | ADMIN | MEMBER | VIEWER`), expanding schema to **18 models** and **8 enums**, plus `User.emailVerifiedAt`, `User.trialGrantedAt`, and `User.passwordUpdatedAt`.
+  - Implemented 256-bit `crypto.randomBytes(32)` tokens stored strictly as SHA-256 `tokenHash`, delivered via `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain`, `__Host-shotistry_session` + `Secure` cookie in production.
+  - Added complete session lifecycle APIs: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`, `GET /api/auth/sessions`, `DELETE /api/auth/sessions/[id]`, `POST /api/auth/sessions/revoke-all`, and `POST /api/auth/password` (revoking all device sessions upon password change).
+- **Cryptographic Passwords, Rate Limiting & Multi-Layer CSRF (`src/lib/auth/password.ts`, `src/lib/security/rate-limit.ts`, `src/lib/security/csrf.ts`):**
+  - Implemented native `crypto.scrypt` (`N=16384,r=8,p=1`) + `crypto.timingSafeEqual` + `constantTimeDummyVerify` anti-enumeration.
+  - Added sliding-window rate limits (`10/15m` register & login, `5/15m` password update) and four-layer CSRF validation (`SameSite=Lax`, JSON pre-auth check, `Sec-Fetch-Site` + `Origin`/`Referer`, and timing-safe session-bound `x-csrf-token`).
+- **Multi-Tier RBAC & Out-of-Band CLI Admin Bootstrap (`src/lib/auth/rbac.ts`, `src/lib/auth/admin-bootstrap.ts`, `scripts/bootstrap-admin.mjs`):**
+  - Separated `PlatformRole` (`USER | SUPPORT | ADMIN`) from `WorkspaceRole` (`OWNER | ADMIN | MEMBER | VIEWER`) loaded live from SQL on every request.
+  - Added `/api/workspaces`, `/api/workspace/switch`, and `/api/workspaces/[id]/members` with hierarchical delegation caps (`canManageWorkspaceMemberRole`), `OWNER`-only billing checkout, bounded `SUPPORT` goodwill credits (`+1..+200`), and one-time CLI admin bootstrap (`SHOTISTRY_ADMIN_BOOTSTRAP_SECRET` >= 24 chars).
+- **Frontend Auth, Account Hub & Workspace Controls (`src/context/AppContext.tsx`, `src/components/Navbar.tsx`, `src/app/{login,register,account,studio,pricing,admin}/page.tsx`):**
+  - Removed forged `x-user-*` headers; added cookie+CSRF `authorizedFetch()`, bilingual `/login`, `/register`, and `/account` (workspace switcher, member manager, multi-device session manager, password update, verification status).
+- **System Actor, RBAC, Use Case & Security Docs + Test Suites (`tests/auth-security.test.mjs`, `tests/rbac-routes.test.mjs`):**
+  - Authored `docs/product/system-actors.md`, `docs/product/use-case-specification.md`, `docs/security/rbac-matrix.md`, and `docs/security/authentication-authorization.md` with Mermaid diagrams, and added 20 security/RBAC tests (**89 active passing / 0 failing / 6 skipped across 15 test files**).
+
+### Changed & Fixed
+- **Eliminated Legacy Auth Bypasses & Anonymous Auto-Provisioning:**
+  - Stopped defaulting unauthenticated callers to `ADMIN`, stopped silent auto-creation of default merchants/workspaces/trial credits on anonymous or webhook requests, enforced `trialGrantedAt` single-trial anti-farming (`0` credits on additional workspaces), and removed implicit `ADMIN` cross-tenant bypass on `/api/jobs/[id]`.
+  - Required `ASSET_SIGNING_SECRET` (>=16 chars, fail-closed in production) and `baseDir + path.sep` directory traversal protection in `src/lib/storage/asset-storage.ts`.
+
 ## [0.2.2] - 2026-11-08 (Final Financial Accuracy & Genuine Final-Image Fidelity Verification)
 ### Added
 - **Centralized Model-Specific Cost Configuration (`src/lib/pricing/model-costs.ts`, `tests/pricing.test.mjs`):**

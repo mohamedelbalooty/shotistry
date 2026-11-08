@@ -3,6 +3,8 @@ export type CountryCode = Country;
 export type Currency = 'EGP' | 'SAR' | 'USD';
 export type CurrencyCode = Currency;
 export type Locale = 'ar' | 'en';
+export type PlatformRole = 'USER' | 'SUPPORT' | 'ADMIN';
+export type WorkspaceRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 
 export type PlanTier = 'FREE' | 'STARTER' | 'PRO' | 'AGENCY';
 

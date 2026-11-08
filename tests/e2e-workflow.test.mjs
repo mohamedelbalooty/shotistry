@@ -1,7 +1,11 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { resetDbForTests } from '../src/lib/db/prisma.ts';
+import { resetRateLimitsForTests } from '../src/lib/security/rate-limit.ts';
+import { bootstrapPlatformAdmin } from '../src/lib/auth/admin-bootstrap.ts';
 import { createSampleProductPngDataUrl } from '../src/lib/ai/image-processor.ts';
+import { POST as registerPost } from '../src/app/api/auth/register/route.ts';
+import { POST as loginPost } from '../src/app/api/auth/login/route.ts';
 import { GET as getWorkspaceSession } from '../src/app/api/workspace/session/route.ts';
 import { POST as postUploadAsset } from '../src/app/api/assets/upload/route.ts';
 import { GET as getDownloadAsset } from '../src/app/api/assets/download/route.ts';
@@ -12,21 +16,52 @@ import { POST as postCheckoutIntent } from '../src/app/api/billing/checkout-inte
 import { GET as getAdminMetrics } from '../src/app/api/admin/metrics/route.ts';
 import { POST as postAdminAdjust } from '../src/app/api/admin/credits/adjust/route.ts';
 
+import { markEmailVerifiedForTests } from './helpers/verify-email.mjs';
+
+function extractCookie(res) {
+  const setCookie = res.headers.get('set-cookie') || '';
+  const match = setCookie.match(/shotistry_session=([^;]+)/);
+  return match ? `shotistry_session=${match[1]}` : '';
+}
+
 describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
   beforeEach(async () => {
     await resetDbForTests();
+    resetRateLimitsForTests();
+    process.env.SHOTISTRY_ADMIN_BOOTSTRAP_SECRET = 'bootstrap_secret_minimum_32_characters_ok';
   });
 
-  test('completes full merchant journey: Session -> Asset Upload/Signed Download -> Studio Transformation -> Job Verification -> Paymob Checkout/Webhook -> Admin Telemetry & Audit Log', async () => {
-    const headers = {
-      'x-workspace-id': 'ws-e2e-merchant',
-      'x-user-id': 'user-e2e-merchant',
-      'x-country': 'SA',
+  test('completes full merchant journey: Register -> Session -> Asset Upload/Signed Download -> Studio Transformation -> Job Verification -> Paymob Checkout/Webhook -> Admin Telemetry & Audit Log', async () => {
+    // 0. Register a merchant account atomically (5 initial trial credits, SAR)
+    const regRes = await registerPost(
+      new Request('http://localhost:3000/api/auth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'e2e-merchant@riyadh.sa',
+          password: 'MerchantE2ePassword2026!',
+          name: 'E2E Merchant',
+          country: 'SA',
+          workspaceName: 'E2E Saudi Studio',
+        }),
+      })
+    );
+    assert.equal(regRes.status, 201);
+    const merchantCookie = extractCookie(regRes);
+    const regBody = await regRes.json();
+    const merchantWsId = regBody.activeWorkspace.workspaceId;
+    const merchantCsrf = regBody.csrfToken;
+
+    const authHeaders = {
+      cookie: merchantCookie,
+      'x-csrf-token': merchantCsrf,
     };
 
-    // 1. Provision & inspect initial workspace session (5 free trial credits)
+    // 1. Inspect initial workspace session (5 free trial credits)
     const sessionRes1 = await getWorkspaceSession(
-      new Request('http://localhost:3000/api/workspace/session', { headers })
+      new Request('http://localhost:3000/api/workspace/session', {
+        headers: { cookie: merchantCookie },
+      })
     );
     assert.equal(sessionRes1.status, 200);
     const session1 = await sessionRes1.json();
@@ -46,7 +81,7 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
     const uploadRes = await postUploadAsset(
       new Request('http://localhost:3000/api/assets/upload', {
         method: 'POST',
-        headers: { ...headers, 'content-type': 'application/json' },
+        headers: { ...authHeaders, 'content-type': 'application/json' },
         body: JSON.stringify({ imageBase64: rawProductPng }),
       })
     );
@@ -67,7 +102,7 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
     const genRes = await postGeneratePhotoshoot(
       new Request('http://localhost:3000/api/photoshoots/generate', {
         method: 'POST',
-        headers: { ...headers, 'content-type': 'application/json' },
+        headers: { ...authHeaders, 'content-type': 'application/json' },
         body: JSON.stringify({
           productTitle: 'عطر العود الملكي الفاخر',
           productCategory: 'Fragrances',
@@ -87,7 +122,9 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
 
     // 4. Verify Job Status endpoint
     const jobRes = await getJobById(
-      new Request(`http://localhost:3000/api/jobs/${genBody.data.jobId}`, { headers }),
+      new Request(`http://localhost:3000/api/jobs/${genBody.data.jobId}`, {
+        headers: { cookie: merchantCookie },
+      }),
       { params: Promise.resolve({ id: genBody.data.jobId }) }
     );
     assert.equal(jobRes.status, 200);
@@ -104,12 +141,13 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
     assert.equal(plansBody.currency, 'SAR');
     assert.equal(plansBody.plans.PRO.priceSAR, 189);
 
+    await markEmailVerifiedForTests(regBody.user.id);
+
     const checkoutRes = await postCheckoutIntent(
       new Request('http://localhost:3000/api/billing/checkout-intent', {
         method: 'POST',
-        headers: { ...headers, 'content-type': 'application/json' },
+        headers: { ...authHeaders, 'content-type': 'application/json' },
         body: JSON.stringify({
-          workspaceId: 'ws-e2e-merchant',
           kind: 'SUBSCRIPTION',
           planTier: 'PRO',
           currency: 'SAR',
@@ -124,24 +162,44 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
 
     // Verify workspace balance is now 4 + 200 = 204 credits and PRO plan is ACTIVE
     const sessionRes2 = await getWorkspaceSession(
-      new Request('http://localhost:3000/api/workspace/session', { headers })
+      new Request('http://localhost:3000/api/workspace/session', {
+        headers: { cookie: merchantCookie },
+      })
     );
     const session2 = await sessionRes2.json();
     assert.equal(session2.workspace.availableCredits, 204);
     assert.equal(session2.workspace.planTier, 'PRO');
     assert.equal(session2.workspace.subscriptionStatus, 'ACTIVE');
 
-    // 6. Verify Admin Metrics & Audited Credit Adjustment (+25 credits -> 229 credits)
+    // 6. Bootstrap Platform Admin, authenticate, and verify Admin Metrics & Credit Adjustment (+25 -> 229)
+    await bootstrapPlatformAdmin({
+      email: 'e2e-admin@shotistry.app',
+      password: 'AdminE2ePassword2026!',
+      bootstrapSecret: process.env.SHOTISTRY_ADMIN_BOOTSTRAP_SECRET,
+    });
+    const adminLoginRes = await loginPost(
+      new Request('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'e2e-admin@shotistry.app',
+          password: 'AdminE2ePassword2026!',
+        }),
+      })
+    );
+    const adminCookie = extractCookie(adminLoginRes);
+    const adminLoginBody = await adminLoginRes.json();
+
     const adjustRes = await postAdminAdjust(
       new Request('http://localhost:3000/api/admin/credits/adjust', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-user-id': 'admin-e2e',
-          'x-user-role': 'ADMIN',
+          cookie: adminCookie,
+          'x-csrf-token': adminLoginBody.csrfToken,
         },
         body: JSON.stringify({
-          workspaceId: 'ws-e2e-merchant',
+          workspaceId: merchantWsId,
           targetEmail: session2.workspace.email,
           amount: 25,
           reason: 'VIP onboarding bonus',
@@ -154,7 +212,7 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
 
     const metricsRes = await getAdminMetrics(
       new Request('http://localhost:3000/api/admin/metrics', {
-        headers: { 'x-user-role': 'ADMIN' },
+        headers: { cookie: adminCookie },
       })
     );
     assert.equal(metricsRes.status, 200);
@@ -163,7 +221,6 @@ describe('Full Shotistry Merchant & Admin End-to-End Workflow', () => {
     assert.equal(metrics.mrrSar, 189);
     assert.equal(metrics.totalImagesGenerated, 1);
     assert.equal(metrics.generationSuccessRate, 100);
-    assert.equal(metrics.recentAuditLogs.length, 1);
+    assert.ok(metrics.recentAuditLogs.some((l) => l.action === 'CREDIT_ADJUSTMENT'));
   });
 });
-

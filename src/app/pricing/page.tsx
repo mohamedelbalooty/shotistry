@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useApp } from '../../context/AppContext';
 import { SUBSCRIPTION_PLANS, TOP_UP_PACKS, formatCurrency } from '../../lib/pricing/plans';
 import { PlanTier } from '../../lib/types';
@@ -12,18 +14,61 @@ import {
   Zap,
   HelpCircle,
   ShoppingBag,
+  Lock,
+  AlertCircle,
 } from 'lucide-react';
 
 export default function PricingPage() {
-  const { workspaceId, userId, country, setCountry, currency, refreshWorkspace, t } = useApp();
+  const {
+    isAuthenticated,
+    isAuthLoading,
+    user,
+    activeWorkspace,
+    workspaceRole,
+    authorizedFetch,
+    country,
+    setCountry,
+    currency,
+    locale,
+    refreshWorkspace,
+    t,
+  } = useApp();
+  const router = useRouter();
   const [activePlan, setActivePlan] = useState<PlanTier>('FREE');
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkoutNotification, setCheckoutNotification] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (activeWorkspace?.planTier && activeWorkspace.planTier in SUBSCRIPTION_PLANS) {
+      setActivePlan(activeWorkspace.planTier as PlanTier);
+    } else {
+      setActivePlan('FREE');
+    }
+  }, [activeWorkspace?.planTier]);
+
   const handleSubscribe = async (tier: PlanTier) => {
+    if (!isAuthenticated) {
+      router.push('/login?next=/pricing');
+      return;
+    }
+
+    if (workspaceRole !== 'OWNER') {
+      setCheckoutNotification(t.billingOwnerOnlyNotice);
+      return;
+    }
+
+    if (user && !user.emailVerified) {
+      setCheckoutNotification(
+        country === 'SA' || locale === 'ar'
+          ? 'تأكيد البريد الإلكتروني مطلوب قبل ترقية الحساب وإتمام الدفع. انتقل لصفحة الحساب لتأكيد بريدك.'
+          : 'Email verification is required before purchasing plans. Go to your Account page to verify.'
+      );
+      return;
+    }
+
     const plan = SUBSCRIPTION_PLANS[tier];
     if (tier === 'FREE') {
-      setCheckoutNotification('أنت مشترك بالفعل في التجربة المجانية ولديك 5 رصيد.');
+      setCheckoutNotification('أنت مشترك بالفعل في التجربة المجانية ولديك رصيدك الأساسي.');
       return;
     }
 
@@ -32,21 +77,17 @@ export default function PricingPage() {
 
     setIsProcessing(true);
     try {
-      const res = await fetch('/api/billing/checkout-intent', {
+      const res = await authorizedFetch('/api/billing/checkout-intent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-workspace-id': workspaceId,
-          'x-user-id': userId,
-          'x-country': country,
         },
         body: JSON.stringify({
-          workspaceId,
           kind: 'SUBSCRIPTION',
           planTier: tier,
           currency,
           paymentMethod: country === 'SA' ? 'mada' : 'card',
-          sandboxSimulateWebhook: true,
+          ...(process.env.NODE_ENV !== 'production' ? { sandboxSimulateWebhook: true } : {}),
         }),
       });
       const data = await res.json();
@@ -55,10 +96,16 @@ export default function PricingPage() {
       }
 
       await refreshWorkspace();
-      setActivePlan(tier);
-      setCheckoutNotification(
-        `تم توثيق اشتراكك في باقة "${plan.nameAr}" (${formattedPrice}) عبر Paymob Webhook الموقّع رقمياً (HMAC-SHA512) وإضافة ${plan.monthlyCredits} رصيد إلى دفتر الأستاذ!`
-      );
+      if (data.intent?.status === 'SUCCEEDED_SANDBOX') {
+        setActivePlan(tier);
+        setCheckoutNotification(
+          `تم توثيق اشتراكك في باقة "${plan.nameAr}" (${formattedPrice}) عبر Paymob Webhook الموقّع رقمياً (HMAC-SHA512) وإضافة ${plan.monthlyCredits} رصيد إلى دفتر الأستاذ!`
+        );
+      } else {
+        setCheckoutNotification(
+          `تم إنشاء طلب الدفع رقم ${data.intent?.paymobOrderId} (${formattedPrice}) بانتظار التأكيد عبر Paymob.`
+        );
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'فشل الاتصال ببوابة الدفع';
       setCheckoutNotification(msg);
@@ -68,6 +115,25 @@ export default function PricingPage() {
   };
 
   const handleBuyTopUp = async (packId: string) => {
+    if (!isAuthenticated) {
+      router.push('/login?next=/pricing');
+      return;
+    }
+
+    if (workspaceRole !== 'OWNER') {
+      setCheckoutNotification(t.billingOwnerOnlyNotice);
+      return;
+    }
+
+    if (user && !user.emailVerified) {
+      setCheckoutNotification(
+        country === 'SA' || locale === 'ar'
+          ? 'تأكيد البريد الإلكتروني مطلوب قبل ترقية الحساب وإتمام الدفع. انتقل لصفحة الحساب لتأكيد بريدك.'
+          : 'Email verification is required before purchasing plans. Go to your Account page to verify.'
+      );
+      return;
+    }
+
     const pack = TOP_UP_PACKS.find((p) => p.id === packId);
     if (!pack) return;
 
@@ -76,21 +142,17 @@ export default function PricingPage() {
 
     setIsProcessing(true);
     try {
-      const res = await fetch('/api/billing/checkout-intent', {
+      const res = await authorizedFetch('/api/billing/checkout-intent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-workspace-id': workspaceId,
-          'x-user-id': userId,
-          'x-country': country,
         },
         body: JSON.stringify({
-          workspaceId,
           kind: 'TOP_UP',
           packId: pack.id,
           currency,
           paymentMethod: country === 'SA' ? 'mada' : 'card',
-          sandboxSimulateWebhook: true,
+          ...(process.env.NODE_ENV !== 'production' ? { sandboxSimulateWebhook: true } : {}),
         }),
       });
       const data = await res.json();
@@ -99,9 +161,15 @@ export default function PricingPage() {
       }
 
       await refreshWorkspace();
-      setCheckoutNotification(
-        `تم توثيق شراء ${pack.nameAr} (${formattedPrice}) عبر Paymob Webhook الموقّع وإضافة ${pack.credits} رصيد إلى دفتر الأستاذ!`
-      );
+      if (data.intent?.status === 'SUCCEEDED_SANDBOX') {
+        setCheckoutNotification(
+          `تم توثيق شراء ${pack.nameAr} (${formattedPrice}) عبر Paymob Webhook الموقّع وإضافة ${pack.credits} رصيد إلى دفتر الأستاذ!`
+        );
+      } else {
+        setCheckoutNotification(
+          `تم إنشاء طلب شحن الرصيد رقم ${data.intent?.paymobOrderId} (${formattedPrice}) بانتظار تأكيد Paymob.`
+        );
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'فشل الاتصال ببوابة الدفع';
       setCheckoutNotification(msg);
@@ -149,7 +217,41 @@ export default function PricingPage() {
             </button>
           </div>
         </div>
+
+        {isAuthenticated && user && !user.emailVerified && (
+          <div className="mt-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center justify-between gap-4 text-start">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 shrink-0 text-amber-400" />
+              <span className="text-xs sm:text-sm font-medium">
+                {locale === 'ar'
+                  ? 'تأكيد البريد الإلكتروني مطلوب قبل شراء الباقات وترقية الحساب.'
+                  : 'Email verification is required before purchasing plans and upgrading.'}
+              </span>
+            </div>
+            <Link
+              href="/account"
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-dark-950 font-bold text-xs whitespace-nowrap transition-colors"
+            >
+              {locale === 'ar' ? 'تأكيد بريدي الآن' : 'Verify Email Now'}
+            </Link>
+          </div>
+        )}
       </div>
+
+      {!isAuthLoading && !isAuthenticated && (
+        <div className="max-w-3xl mx-auto p-4 rounded-xl bg-brand-500/10 border border-brand-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-xs text-gray-200">
+            <Lock className="w-4 h-4 text-brand-400 shrink-0" />
+            <span>{t.authRequiredBillingDesc}</span>
+          </div>
+          <Link
+            href="/login?next=/pricing"
+            className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-xs font-bold shrink-0 text-center"
+          >
+            {t.navLogin}
+          </Link>
+        </div>
+      )}
 
       {checkoutNotification && (
         <div className="max-w-2xl mx-auto p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-3 shadow-lg">

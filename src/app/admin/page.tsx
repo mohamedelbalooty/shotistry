@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import {
   Shield,
@@ -13,6 +14,7 @@ import {
   Database,
   Lock,
   RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 
 interface AdminJobRow {
@@ -46,7 +48,17 @@ interface AdminMetricsData {
 }
 
 export default function AdminPage() {
-  const { t, workspaceId, refreshWorkspace } = useApp();
+  const {
+    t,
+    isAuthenticated,
+    isAuthLoading,
+    user,
+    authorizedFetch,
+    refreshWorkspace,
+  } = useApp();
+
+  const isStaff = isAuthenticated && (user?.role === 'ADMIN' || user?.role === 'SUPPORT');
+  const isFullAdmin = user?.role === 'ADMIN';
 
   const [metrics, setMetrics] = useState<AdminMetricsData>({
     totalUsers: 0,
@@ -66,24 +78,21 @@ export default function AdminPage() {
       storage: 'OPERATIONAL_SIGNED_URLS',
     },
   });
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Credit Adjustment State
-  const [adjustTargetEmail, setAdjustTargetEmail] = useState(
-    'user-default-merchant@merchant.shotistry.app'
-  );
-  const [adjustAmount, setAdjustAmount] = useState<number>(50);
-  const [adjustReason, setAdjustReason] = useState('تعويض خدمة عملاء موثق في سجل التدقيق');
+  // Credit Adjustment State (no hardcoded default merchant email)
+  const [adjustTargetEmail, setAdjustTargetEmail] = useState('');
+  const [adjustTargetWorkspaceId, setAdjustTargetWorkspaceId] = useState('');
+  const [adjustAmount, setAdjustAmount] = useState<number>(25);
+  const [adjustReason, setAdjustReason] = useState('');
   const [adjustmentNotice, setAdjustmentNotice] = useState<string | null>(null);
+  const [adjustmentError, setAdjustmentError] = useState<string | null>(null);
 
   const fetchMetrics = useCallback(async () => {
+    if (!isStaff) return;
     setIsLoading(true);
     try {
-      const res = await fetch('/api/admin/metrics', {
-        headers: {
-          'x-user-role': 'ADMIN',
-        },
-      });
+      const res = await authorizedFetch('/api/admin/metrics');
       if (res.ok) {
         const data = await res.json();
         setMetrics(data);
@@ -91,25 +100,28 @@ export default function AdminPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isStaff, authorizedFetch]);
 
   useEffect(() => {
-    void fetchMetrics();
-  }, [fetchMetrics]);
+    if (isStaff) {
+      void fetchMetrics();
+    }
+  }, [isStaff, fetchMetrics]);
 
   const handleAdjustCredits = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAdjustmentNotice(null);
+    setAdjustmentError(null);
     if (!adjustAmount || adjustAmount === 0) return;
 
-    const res = await fetch('/api/admin/credits/adjust', {
+    const res = await authorizedFetch('/api/admin/credits/adjust', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-role': 'ADMIN',
       },
       body: JSON.stringify({
-        targetEmail: adjustTargetEmail,
-        workspaceId,
+        targetEmail: adjustTargetEmail.trim() || undefined,
+        workspaceId: adjustTargetWorkspaceId.trim() || undefined,
         amount: adjustAmount,
         reason: adjustReason,
       }),
@@ -123,9 +135,56 @@ export default function AdminPage() {
         `تم تعديل الرصيد الفعلي في قاعدة البيانات! الرصيد الجديد: ${data.newBalance} رصيد (معرّف التدقيق: ${data.auditLogId}).`
       );
     } else {
-      setAdjustmentNotice(data.error || 'فشل تعديل الرصيد');
+      setAdjustmentError(data.error || 'فشل تعديل الرصيد');
     }
   };
+
+  if (isAuthLoading) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center text-gray-400 text-sm">
+        Loading authorization state...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16 text-center space-y-4">
+        <div className="rounded-2xl bg-dark-900 border border-dark-800 p-8 space-y-4">
+          <Lock className="w-10 h-10 text-brand-400 mx-auto" />
+          <h1 className="text-xl font-bold text-white">{t.authRequiredTitle}</h1>
+          <p className="text-xs text-gray-400">{t.accessDeniedAdminDesc}</p>
+          <Link
+            href="/login?next=/admin"
+            className="inline-flex px-6 py-2.5 rounded-xl bg-brand-500 text-white text-xs font-bold"
+          >
+            {t.navLogin}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isStaff) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16 text-center space-y-4">
+        <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-8 space-y-4">
+          <Shield className="w-10 h-10 text-rose-400 mx-auto" />
+          <h1 className="text-xl font-bold text-white">{t.accessDeniedTitle}</h1>
+          <p className="text-xs text-gray-300 leading-relaxed">{t.accessDeniedAdminDesc}</p>
+          <p className="text-[11px] font-mono text-gray-400">
+            Authenticated Role: {user?.role}
+          </p>
+          <Link
+            href="/studio"
+            className="inline-flex px-6 py-2.5 rounded-xl bg-dark-800 text-white border border-dark-700 text-xs font-bold"
+          >
+            {t.navStudio}
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
@@ -135,6 +194,9 @@ export default function AdminPage() {
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white flex items-center gap-3">
             <Shield className="w-7 h-7 text-brand-400" />
             <span>{t.adminTitle}</span>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/15 text-brand-300 border border-brand-500/30 font-mono">
+              {user?.role}
+            </span>
           </h1>
           <p className="text-gray-400 text-xs sm:text-sm mt-1">
             مؤشرات الأداء الفعلية المستخرجة مباشرة من قاعدة البيانات وسجل التدقيق المالي
@@ -143,6 +205,7 @@ export default function AdminPage() {
 
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => void fetchMetrics()}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-dark-900 hover:bg-dark-800 text-gray-200 text-xs font-semibold border border-dark-700"
           >
@@ -156,6 +219,13 @@ export default function AdminPage() {
         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-3">
           <CheckCircle className="w-5 h-5 shrink-0" />
           <span>{adjustmentNotice}</span>
+        </div>
+      )}
+
+      {adjustmentError && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <span>{adjustmentError}</span>
         </div>
       )}
 
@@ -196,7 +266,7 @@ export default function AdminPage() {
             {metrics.payingSubscribers}
           </div>
           <p className="text-[11px] text-gray-500">
-            من إجمالي {metrics.totalUsers.toLocaleString()} مستخدم في قاعدة البيانات
+            من إجمالي {metrics.totalUsers.toLocaleString()} تاجر مسجل
           </p>
         </div>
 
@@ -226,7 +296,7 @@ export default function AdminPage() {
 
         {metrics.recentJobs.length === 0 ? (
           <p className="text-xs text-gray-500 py-6 text-center">
-            لا توجد عمليات توليد مسجلة في قاعدة البيانات حتى الآن. قم بتوليد صورة من الاستوديو لظهورها هنا فوراً.
+            لا توجد عمليات توليد مسجلة في قاعدة البيانات حتى الآن.
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -278,26 +348,44 @@ export default function AdminPage() {
             <span>أداة تعديل أرصدة المشتركين (Audit Ledger Adjustment)</span>
           </h2>
           <p className="text-xs text-gray-400 leading-relaxed">
-            تنفذ هذه الأداة قيداً محاسبياً في جدول CreditLedger وتكتب سجلاً دائماً في جدول AdminAuditLog.
+            {isFullAdmin
+              ? 'صلاحية ADMIN: تعديل الرصيد بالزيادة أو الخصم مع تسجيل قيد غير قابل للتعديل في AdminAuditLog.'
+              : 'صلاحية SUPPORT: منح تعويض رصيد موجب بحد أقصى 200 رصيد لكل عملية مع تسجيل كامل في AdminAuditLog.'}
           </p>
 
           <form onSubmit={handleAdjustCredits} className="space-y-3">
             <div>
-              <label className="text-xs text-gray-400 block mb-1">البريد الإلكتروني للعميل</label>
+              <label className="text-xs text-gray-400 block mb-1">
+                البريد الإلكتروني لمالك المتجر (أو أدخل معرّف مساحة العمل أدناه)
+              </label>
               <input
                 type="email"
                 value={adjustTargetEmail}
                 onChange={(e) => setAdjustTargetEmail(e.target.value)}
-                required
+                placeholder="merchant@store.sa"
                 className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500"
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">عدد الرصيد المراد إضافته</label>
+              <label className="text-xs text-gray-400 block mb-1">
+                معرّف مساحة العمل المستهدفة (Workspace ID - اختياري)
+              </label>
+              <input
+                type="text"
+                value={adjustTargetWorkspaceId}
+                onChange={(e) => setAdjustTargetWorkspaceId(e.target.value)}
+                placeholder="ws-..."
+                className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                عدد الرصيد ({isFullAdmin ? '-10000 .. +10000' : '1 .. 200'})
+              </label>
               <input
                 type="number"
-                min="1"
-                max="1000"
+                min={isFullAdmin ? -10000 : 1}
+                max={isFullAdmin ? 10000 : 200}
                 value={adjustAmount}
                 onChange={(e) => setAdjustAmount(Number(e.target.value))}
                 required
@@ -306,12 +394,14 @@ export default function AdminPage() {
             </div>
             <div>
               <label className="text-xs text-gray-400 block mb-1">
-                سبب التعديل (إلزامي للتدقيق المالي)
+                سبب التعديل (إلزامي للتدقيق المالي - 3 أحرف على الأقل)
               </label>
               <input
                 type="text"
+                minLength={3}
                 value={adjustReason}
                 onChange={(e) => setAdjustReason(e.target.value)}
+                placeholder="SLA compensation ticket #1042"
                 required
                 className="w-full px-3 py-2 rounded-lg bg-dark-950 border border-dark-700 text-xs text-white focus:outline-none focus:border-brand-500"
               />

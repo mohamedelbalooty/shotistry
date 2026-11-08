@@ -1,10 +1,13 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { resetDbForTests, getDb } from '../src/lib/db/prisma.ts';
+import { resetRateLimitsForTests } from '../src/lib/security/rate-limit.ts';
 import { CreditLedgerService } from '../src/lib/ledger/credit-ledger-service.ts';
 import { PaymobSecurity } from '../src/lib/paymob/paymob-hmac.ts';
+import { POST as registerPost } from '../src/app/api/auth/register/route.ts';
 import { POST as paymobWebhookPost } from '../src/app/api/webhooks/paymob/route.ts';
 import { POST as checkoutIntentPost } from '../src/app/api/billing/checkout-intent/route.ts';
+import { markEmailVerifiedForTests } from './helpers/verify-email.mjs';
 
 describe('Paymob Webhook & Checkout Lifecycle (Fail-Closed & Idempotent SQL Integration)', () => {
   const TEST_SECRET = 'live_grade_paymob_hmac_secret_2026_sha512';
@@ -12,6 +15,7 @@ describe('Paymob Webhook & Checkout Lifecycle (Fail-Closed & Idempotent SQL Inte
 
   beforeEach(async () => {
     await resetDbForTests();
+    resetRateLimitsForTests();
     process.env.PAYMOB_HMAC_SECRET = TEST_SECRET;
   });
 
@@ -291,12 +295,29 @@ describe('Paymob Webhook & Checkout Lifecycle (Fail-Closed & Idempotent SQL Inte
   });
 
   test('creates server-side checkout intent and records pending PaymentTransaction', async () => {
+    const regRes = await registerPost(
+      new Request('http://localhost:3000/api/auth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'checkout-owner@store.eg',
+          password: 'CheckoutOwnerPassword2026!',
+          country: 'EG',
+        }),
+      })
+    );
+    const setCookie = regRes.headers.get('set-cookie') || '';
+    const match = setCookie.match(/shotistry_session=([^;]+)/);
+    const cookie = match ? `shotistry_session=${match[1]}` : '';
+    const regBody = await regRes.json();
+    await markEmailVerifiedForTests(regBody.user.id);
+
     const req = new Request('http://localhost:3000/api/billing/checkout-intent', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-workspace-id': 'ws-checkout-1',
-        'x-user-id': 'user-checkout-1',
+        cookie,
+        'x-csrf-token': regBody.csrfToken,
       },
       body: JSON.stringify({
         kind: 'SUBSCRIPTION',
