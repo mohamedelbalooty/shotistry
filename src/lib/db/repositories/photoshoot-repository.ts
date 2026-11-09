@@ -23,13 +23,18 @@ export interface JobDetailsRecord {
   rawPrompt: string;
   synthesizedPrompt: string;
   errorMessage: string | null;
+  lastErrorCode?: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  heartbeatAt?: string | null;
+  idempotencyKey?: string | null;
+  assetKey?: string | null;
   createdAt: string;
   workspaceId: string;
   productTitle: string;
   stylePreset: string;
   aspectRatio: string;
+  reservationId?: string | null;
   reservationStatus: string | null;
   reservedAmount: number | null;
 }
@@ -50,6 +55,15 @@ export interface JobImageRecord {
 export interface PhotoshootRepository {
   completeJobAndPersistImage(params: CompleteJobImageParams): Promise<string>;
   findJobById(jobId: string): Promise<JobDetailsRecord | null>;
+  findJobByIdempotencyKey(
+    workspaceId: string,
+    idempotencyKey: string
+  ): Promise<JobDetailsRecord | null>;
+  markJobRunning(jobId: string, startedAt?: string): Promise<void>;
+  markJobFailed(jobId: string, errorMessage: string, lastErrorCode?: string): Promise<void>;
+  findStaleRunningJobs(
+    staleBeforeIso: string
+  ): Promise<Array<{ id: string; reservationId: string | null }>>;
   listJobImages(jobId: string): Promise<JobImageRecord[]>;
 }
 
@@ -101,13 +115,18 @@ export class SqlitePhotoshootRepository implements PhotoshootRepository {
                 j."rawPrompt",
                 j."synthesizedPrompt",
                 j."errorMessage",
+                j."lastErrorCode",
                 j."startedAt",
                 j."completedAt",
+                j."heartbeatAt",
+                j."idempotencyKey",
+                j."assetKey",
                 j."createdAt",
                 p."workspaceId",
                 p."title" AS "productTitle",
                 p."stylePreset",
                 p."aspectRatio",
+                r."id" AS "reservationId",
                 r."status" AS "reservationStatus",
                 r."amount" AS "reservedAmount"
          FROM "GenerationJob" j
@@ -115,29 +134,99 @@ export class SqlitePhotoshootRepository implements PhotoshootRepository {
          LEFT JOIN "CreditReservation" r ON r."generationJobId" = j."id"
          WHERE j."id" = ?`
       )
-      .get(jobId) as
-      | {
-          id: string;
-          photoshootId: string;
-          status: string;
-          modelUsed: string;
-          creditCost: number;
-          rawPrompt: string;
-          synthesizedPrompt: string;
-          errorMessage: string | null;
-          startedAt: string | null;
-          completedAt: string | null;
-          createdAt: string;
-          workspaceId: string;
-          productTitle: string;
-          stylePreset: string;
-          aspectRatio: string;
-          reservationStatus: string | null;
-          reservedAmount: number | null;
-        }
-      | undefined;
+      .get(jobId) as JobDetailsRecord | undefined;
 
     return row ?? null;
+  }
+
+  async findJobByIdempotencyKey(
+    workspaceId: string,
+    idempotencyKey: string
+  ): Promise<JobDetailsRecord | null> {
+    const db = this.getDb();
+    const row = db
+      .prepare(
+        `SELECT j."id",
+                j."photoshootId",
+                j."status",
+                j."modelUsed",
+                j."creditCost",
+                j."rawPrompt",
+                j."synthesizedPrompt",
+                j."errorMessage",
+                j."lastErrorCode",
+                j."startedAt",
+                j."completedAt",
+                j."heartbeatAt",
+                j."idempotencyKey",
+                j."assetKey",
+                j."createdAt",
+                p."workspaceId",
+                p."title" AS "productTitle",
+                p."stylePreset",
+                p."aspectRatio",
+                r."id" AS "reservationId",
+                r."status" AS "reservationStatus",
+                r."amount" AS "reservedAmount"
+         FROM "GenerationJob" j
+         JOIN "Photoshoot" p ON p."id" = j."photoshootId"
+         LEFT JOIN "CreditReservation" r ON r."generationJobId" = j."id"
+         WHERE p."workspaceId" = ? AND j."idempotencyKey" = ?`
+      )
+      .get(workspaceId, idempotencyKey) as JobDetailsRecord | undefined;
+
+    return row ?? null;
+  }
+
+  async markJobRunning(jobId: string, startedAt?: string): Promise<void> {
+    const db = this.getDb();
+    const ts = startedAt || new Date().toISOString();
+    db.prepare(
+      `UPDATE "GenerationJob"
+       SET "status" = 'PROCESSING',
+           "startedAt" = COALESCE("startedAt", ?),
+           "heartbeatAt" = ?
+       WHERE "id" = ?`
+    ).run(ts, ts, jobId);
+  }
+
+  async markJobFailed(jobId: string, errorMessage: string, lastErrorCode?: string): Promise<void> {
+    const db = this.getDb();
+    const now = new Date().toISOString();
+    db.prepare(
+      `UPDATE "GenerationJob"
+       SET "status" = 'FAILED',
+           "errorMessage" = ?,
+           "lastErrorCode" = ?,
+           "completedAt" = ?
+       WHERE "id" = ?`
+    ).run(errorMessage, lastErrorCode ?? null, now, jobId);
+  }
+
+  async findStaleRunningJobs(
+    staleBeforeIso: string
+  ): Promise<Array<{ id: string; reservationId: string | null }>> {
+    const db = this.getDb();
+    const rows = db
+      .prepare(
+        `SELECT j."id", r."id" AS "reservationId"
+         FROM "GenerationJob" j
+         LEFT JOIN "CreditReservation" r ON r."generationJobId" = j."id"
+         WHERE j."status" = 'PROCESSING'
+           AND (
+             (j."heartbeatAt" IS NOT NULL AND j."heartbeatAt" < ?)
+             OR
+             (j."heartbeatAt" IS NULL AND j."startedAt" IS NOT NULL AND j."startedAt" < ?)
+             OR
+             (j."heartbeatAt" IS NULL AND j."startedAt" IS NULL AND j."createdAt" < ?)
+           )`
+      )
+      .all(staleBeforeIso, staleBeforeIso, staleBeforeIso) as Array<{
+      id: string;
+      reservationId: string | null;
+    }>;
+
+    return rows;
   }
 
   async listJobImages(jobId: string): Promise<JobImageRecord[]> {
@@ -229,6 +318,7 @@ export class PostgresPhotoshootRepository implements PhotoshootRepository {
         },
         reservation: {
           select: {
+            id: true,
             status: true,
             amount: true,
           },
@@ -247,16 +337,127 @@ export class PostgresPhotoshootRepository implements PhotoshootRepository {
       rawPrompt: job.rawPrompt,
       synthesizedPrompt: job.synthesizedPrompt,
       errorMessage: job.errorMessage,
+      lastErrorCode: (job as any).lastErrorCode ?? null,
       startedAt: job.startedAt ? job.startedAt.toISOString() : null,
       completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+      heartbeatAt: (job as any).heartbeatAt ? (job as any).heartbeatAt.toISOString() : null,
+      idempotencyKey: (job as any).idempotencyKey ?? null,
+      assetKey: (job as any).assetKey ?? null,
       createdAt: job.createdAt.toISOString(),
       workspaceId: job.photoshoot.workspaceId,
       productTitle: job.photoshoot.title,
       stylePreset: job.photoshoot.stylePreset,
       aspectRatio: job.photoshoot.aspectRatio,
+      reservationId: job.reservation ? job.reservation.id : null,
       reservationStatus: job.reservation ? job.reservation.status : null,
       reservedAmount: job.reservation ? job.reservation.amount : null,
     };
+  }
+
+  async findJobByIdempotencyKey(
+    workspaceId: string,
+    idempotencyKey: string
+  ): Promise<JobDetailsRecord | null> {
+    const job = await this.client.generationJob.findFirst({
+      where: {
+        idempotencyKey,
+        photoshoot: { workspaceId },
+      },
+      include: {
+        photoshoot: {
+          select: {
+            workspaceId: true,
+            title: true,
+            stylePreset: true,
+            aspectRatio: true,
+          },
+        },
+        reservation: {
+          select: {
+            id: true,
+            status: true,
+            amount: true,
+          },
+        },
+      },
+    });
+
+    if (!job) return null;
+
+    return {
+      id: job.id,
+      photoshootId: job.photoshootId,
+      status: job.status,
+      modelUsed: job.modelUsed,
+      creditCost: job.creditCost,
+      rawPrompt: job.rawPrompt,
+      synthesizedPrompt: job.synthesizedPrompt,
+      errorMessage: job.errorMessage,
+      lastErrorCode: (job as any).lastErrorCode ?? null,
+      startedAt: job.startedAt ? job.startedAt.toISOString() : null,
+      completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+      heartbeatAt: (job as any).heartbeatAt ? (job as any).heartbeatAt.toISOString() : null,
+      idempotencyKey: (job as any).idempotencyKey ?? null,
+      assetKey: (job as any).assetKey ?? null,
+      createdAt: job.createdAt.toISOString(),
+      workspaceId: job.photoshoot.workspaceId,
+      productTitle: job.photoshoot.title,
+      stylePreset: job.photoshoot.stylePreset,
+      aspectRatio: job.photoshoot.aspectRatio,
+      reservationId: job.reservation ? job.reservation.id : null,
+      reservationStatus: job.reservation ? job.reservation.status : null,
+      reservedAmount: job.reservation ? job.reservation.amount : null,
+    };
+  }
+
+  async markJobRunning(jobId: string, startedAt?: string): Promise<void> {
+    const date = startedAt ? new Date(startedAt) : new Date();
+    await this.client.generationJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'PROCESSING',
+        startedAt: date,
+        heartbeatAt: date,
+      },
+    });
+  }
+
+  async markJobFailed(jobId: string, errorMessage: string, lastErrorCode?: string): Promise<void> {
+    await this.client.generationJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'FAILED',
+        errorMessage,
+        lastErrorCode: lastErrorCode ?? null,
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  async findStaleRunningJobs(
+    staleBeforeIso: string
+  ): Promise<Array<{ id: string; reservationId: string | null }>> {
+    const threshold = new Date(staleBeforeIso);
+    const jobs = await this.client.generationJob.findMany({
+      where: {
+        status: 'PROCESSING',
+        OR: [
+          { heartbeatAt: { lt: threshold } },
+          { AND: [{ heartbeatAt: null }, { startedAt: { lt: threshold } }] },
+          { AND: [{ heartbeatAt: null }, { startedAt: null }, { createdAt: { lt: threshold } }] },
+        ],
+      },
+      include: {
+        reservation: {
+          select: { id: true },
+        },
+      },
+    });
+
+    return jobs.map((j) => ({
+      id: j.id,
+      reservationId: j.reservation ? j.reservation.id : null,
+    }));
   }
 
   async listJobImages(jobId: string): Promise<JobImageRecord[]> {

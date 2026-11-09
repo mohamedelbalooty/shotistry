@@ -167,8 +167,17 @@ CREATE TABLE IF NOT EXISTS "GenerationJob" (
   "rawPrompt" TEXT NOT NULL,
   "synthesizedPrompt" TEXT NOT NULL,
   "errorMessage" TEXT,
+  "lastErrorCode" TEXT,
+  "attempts" INTEGER NOT NULL DEFAULT 0,
   "startedAt" TEXT,
   "completedAt" TEXT,
+  "heartbeatAt" TEXT,
+  "idempotencyKey" TEXT UNIQUE,
+  "assetKey" TEXT,
+  "inputTokens" INTEGER,
+  "outputTokens" INTEGER,
+  "thoughtTokens" INTEGER,
+  "costUsdMicros" INTEGER,
   "createdAt" TEXT NOT NULL,
   FOREIGN KEY ("photoshootId") REFERENCES "Photoshoot"("id") ON DELETE CASCADE,
   FOREIGN KEY ("promptVersionId") REFERENCES "PromptVersion"("id") ON DELETE SET NULL
@@ -337,6 +346,39 @@ function ensureSqliteColumnMigrations(db: DatabaseSync): void {
   }
   if (!userCols.has('passwordUpdatedAt')) {
     db.exec(`ALTER TABLE "User" ADD COLUMN "passwordUpdatedAt" TEXT;`);
+  }
+
+  const jobCols = new Set(
+    (db.prepare(`PRAGMA table_info("GenerationJob")`).all() as Array<{ name: string }>).map(
+      (col) => col.name
+    )
+  );
+  if (!jobCols.has('lastErrorCode')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "lastErrorCode" TEXT;`);
+  }
+  if (!jobCols.has('attempts')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "attempts" INTEGER NOT NULL DEFAULT 0;`);
+  }
+  if (!jobCols.has('heartbeatAt')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "heartbeatAt" TEXT;`);
+  }
+  if (!jobCols.has('idempotencyKey')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "idempotencyKey" TEXT;`);
+  }
+  if (!jobCols.has('assetKey')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "assetKey" TEXT;`);
+  }
+  if (!jobCols.has('inputTokens')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "inputTokens" INTEGER;`);
+  }
+  if (!jobCols.has('outputTokens')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "outputTokens" INTEGER;`);
+  }
+  if (!jobCols.has('thoughtTokens')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "thoughtTokens" INTEGER;`);
+  }
+  if (!jobCols.has('costUsdMicros')) {
+    db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "costUsdMicros" INTEGER;`);
   }
 }
 

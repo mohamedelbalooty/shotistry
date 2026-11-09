@@ -165,8 +165,62 @@ export default function StudioPage() {
         );
       }
 
-      const result: GenerationResult = payload.data;
-      if (typeof result.remainingCredits === 'number') {
+      let result: GenerationResult;
+
+      // Handle asynchronous 202 Accepted polling
+      if (response.status === 202 && payload.jobId) {
+        setProgressStep('جاري المعالجة وتوليد المشهد في الخلفية...');
+        const jobId = payload.jobId;
+        const maxPollAttempts = 40; // 40 * 1.5s = 60s
+        let completed = false;
+        let pollError: string | null = null;
+        let jobResult: GenerationResult | null = null;
+
+        for (let i = 0; i < maxPollAttempts; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          const jobRes = await authorizedFetch(`/api/jobs/${jobId}`);
+          if (jobRes.ok) {
+            const jobData = await jobRes.json();
+            if (jobData.job?.status === 'COMPLETED' && jobData.images?.length > 0) {
+              completed = true;
+              const img = jobData.images[0];
+              jobResult = {
+                jobId: jobData.job.id,
+                photoshootId: jobData.job.photoshootId,
+                status: 'COMPLETED',
+                imageUrl: img.imageUrl,
+                thumbnailUrl: img.thumbnailUrl || img.imageUrl,
+                resolution: img.resolution,
+                aspectRatio: img.aspectRatio,
+                fidelityScore: img.fidelityScore ?? 1.0,
+                fidelityVerified: true,
+                modelUsed: jobData.job.modelUsed,
+                executionMode: img.executionMode || 'LIVE_GEMINI_API',
+                synthesizedPrompt: jobData.job.synthesizedPrompt,
+                synthIdDetected: Boolean(img.synthIdDetected),
+                creditsCharged: jobData.job.creditCost,
+                completedAt: jobData.job.completedAt || new Date().toISOString(),
+              };
+              break;
+            } else if (jobData.job?.status === 'FAILED') {
+              pollError = jobData.job.errorMessage || 'فشلت عملية التوليد';
+              break;
+            }
+          }
+        }
+
+        if (!completed || !jobResult) {
+          throw new Error(
+            pollError || 'استغرقت عملية التوليد وقتاً أطول من المتوقع. يرجى مراجعة سجل الجلسات.'
+          );
+        }
+
+        result = jobResult;
+      } else {
+        result = payload.data;
+      }
+
+      if (typeof result?.remainingCredits === 'number') {
         syncCredits(result.remainingCredits);
       }
 

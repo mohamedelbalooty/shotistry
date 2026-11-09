@@ -49,7 +49,8 @@
 | [`tests/deploy-env-guards.test.mjs`](file:///E:/GithubProjects/shotistry/tests/deploy-env-guards.test.mjs) | 4 | 4 | 0 | 0 | Integration (Milestone M1 — Deployment Environment Model, Fail-Closed Guards & Health Endpoint) | ✅ PASS |
 | [`tests/object-storage.test.mjs`](file:///E:/GithubProjects/shotistry/tests/object-storage.test.mjs) | 5 | 5 | 0 | 0 | Unit (Milestone M2 — Cloudflare R2 / S3 Object Storage Provider & Key Isolation) | ✅ PASS |
 | [`tests/asset-upload-flow.test.mjs`](file:///E:/GithubProjects/shotistry/tests/asset-upload-flow.test.mjs) | 4 | 4 | 0 | 0 | Integration (Milestone M2 — Presigned Upload Intent, Sharp Finalize, Presigned GET Access Control & Cron Storage Cleanup) | ✅ PASS |
-| **Total Across All 28 Test Files (31 Suites)** | **169** | **151** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **151/151 Active Passing (14/14 Live PG)** |
+| [`tests/async-jobs.test.mjs`](file:///E:/GithubProjects/shotistry/tests/async-jobs.test.mjs) | 5 | 5 | 0 | 0 | Integration (Milestone M3 — Asynchronous Generation Jobs, Idempotency-Key Deduplication, Atomic Settle/Release, Reaper Cron & Studio Polling) | ✅ PASS |
+| **Total Across All 29 Test Files (32 Suites)** | **174** | **156** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **156/156 Active Passing (14/14 Live PG)** |
 
 ---
 
