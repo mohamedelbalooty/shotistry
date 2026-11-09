@@ -69,6 +69,9 @@ export interface CreatePhotoshootJobInput {
   width?: number;
   height?: number;
   fileSize?: number;
+  idempotencyKey?: string;
+  assetKey?: string;
+  status?: string;
 }
 
 export class CreditLedgerService {
@@ -520,18 +523,23 @@ export class CreditLedgerService {
       );
 
       const jobId = `job-${crypto.randomUUID()}`;
+      const status = input.status ?? 'PROCESSING';
       db.prepare(
         `INSERT INTO "GenerationJob" (
-           "id", "photoshootId", "status", "modelUsed", "creditCost", "rawPrompt", "synthesizedPrompt", "startedAt", "createdAt"
-         ) VALUES (?, ?, 'PROCESSING', ?, ?, ?, ?, ?, ?)`
+           "id", "photoshootId", "status", "modelUsed", "creditCost", "rawPrompt",
+           "synthesizedPrompt", "idempotencyKey", "assetKey", "startedAt", "createdAt"
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         jobId,
         photoshootId,
+        status,
         input.modelUsed,
         input.creditCost ?? 1,
         input.rawPrompt,
         input.synthesizedPrompt,
-        now,
+        input.idempotencyKey ?? null,
+        input.assetKey ?? null,
+        status === 'PROCESSING' ? now : null,
         now
       );
 
@@ -540,7 +548,7 @@ export class CreditLedgerService {
         photoshootId,
         productId,
         assetId,
-        status: 'PROCESSING',
+        status,
       };
     });
   }

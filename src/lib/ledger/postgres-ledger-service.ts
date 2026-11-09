@@ -530,16 +530,19 @@ export class PostgresCreditLedgerService {
       });
 
       const jobId = `job-${crypto.randomUUID()}`;
+      const status = (input.status as any) ?? 'PROCESSING';
       await tx.generationJob.create({
         data: {
           id: jobId,
           photoshootId,
-          status: 'PROCESSING',
+          status,
           modelUsed: input.modelUsed,
           creditCost: input.creditCost ?? 1,
           rawPrompt: input.rawPrompt,
           synthesizedPrompt: input.synthesizedPrompt,
-          startedAt: new Date(),
+          idempotencyKey: input.idempotencyKey ?? null,
+          assetKey: input.assetKey ?? null,
+          startedAt: status === 'PROCESSING' ? new Date() : null,
         },
       });
 
@@ -548,7 +551,7 @@ export class PostgresCreditLedgerService {
         photoshootId,
         productId,
         assetId,
-        status: 'PROCESSING',
+        status,
       };
     });
   }

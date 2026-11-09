@@ -247,8 +247,17 @@ model GenerationJob {
   rawPrompt         String             @db.Text
   synthesizedPrompt String             @db.Text
   errorMessage      String?
+  lastErrorCode     String?
+  attempts          Int                @default(0)
   startedAt         DateTime?
   completedAt       DateTime?
+  heartbeatAt       DateTime?
+  idempotencyKey    String?            @unique
+  assetKey          String?
+  inputTokens       Int?
+  outputTokens      Int?
+  thoughtTokens     Int?
+  costUsdMicros     Int?
   createdAt         DateTime           @default(now())
 
   photoshoot        Photoshoot         @relation(fields: [photoshootId], references: [id], onDelete: Cascade)

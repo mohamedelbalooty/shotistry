@@ -1,15 +1,18 @@
-import crypto from 'node:crypto';
 import { PromptSynthesizer } from '../../../../lib/ai/prompt-synthesizer.ts';
 import {
   GeminiClient,
   normalizeImageSizeForModel,
 } from '../../../../lib/ai/gemini-client.ts';
+import { parseImageInput } from '../../../../lib/ai/image-processor.ts';
 import { CreditLedgerService } from '../../../../lib/ledger/credit-ledger-service.ts';
 import { resolveAuthenticatedSession } from '../../../../lib/auth/session.ts';
 import { requireWorkspacePermission } from '../../../../lib/auth/rbac.ts';
 import { validateCsrfRequest } from '../../../../lib/security/csrf.ts';
 import { enforceRateLimitPolicies } from '../../../../lib/security/rate-limit.ts';
 import { getPhotoshootRepository } from '../../../../lib/db/repositories/photoshoot-repository.ts';
+import { getObjectStorage } from '../../../../lib/storage/object-storage.ts';
+import { buildUploadAssetKey, validateWorkspaceKeyAccess } from '../../../../lib/storage/keys.ts';
+import { processGenerationJob } from '../../../../lib/jobs/generation-worker.ts';
 import { SUBSCRIPTION_PLANS } from '../../../../lib/pricing/plans.ts';
 import {
   getCreditWeightForGeneration,
@@ -64,6 +67,30 @@ export async function POST(request: Request) {
       );
     }
 
+    // Idempotency check: return existing job if same key in same workspace
+    const idempotencyKey =
+      request.headers.get('idempotency-key')?.trim() ||
+      (typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined);
+
+    if (idempotencyKey) {
+      const photoshootRepo = getPhotoshootRepository();
+      const existing = await photoshootRepo.findJobByIdempotencyKey(
+        workspace.workspaceId,
+        idempotencyKey
+      );
+      if (existing) {
+        return Response.json(
+          {
+            success: true,
+            jobId: existing.id,
+            photoshootId: existing.photoshootId,
+            status: existing.status,
+          },
+          { status: existing.status === 'COMPLETED' ? 200 : 202 }
+        );
+      }
+    }
+
     const productTitle = typeof body.productTitle === 'string' ? body.productTitle : '';
     const productCategory =
       typeof body.productCategory === 'string' && body.productCategory.trim()
@@ -82,6 +109,7 @@ export async function POST(request: Request) {
     const customDirectives =
       typeof body.customDirectives === 'string' ? body.customDirectives : undefined;
     const rawImageBase64 = typeof body.rawImageBase64 === 'string' ? body.rawImageBase64 : '';
+    const assetKey = typeof body.assetKey === 'string' ? body.assetKey.trim() : undefined;
     const model =
       typeof body.model === 'string' ? (body.model as GeminiImageModelId) : undefined;
     const imageSize =
@@ -95,22 +123,47 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!rawImageBase64.trim()) {
+    if (!assetKey && !rawImageBase64.trim()) {
       return Response.json(
         {
           success: false,
           error:
-            'Missing required field: rawImageBase64. Customer product image is mandatory for product transformation.',
+            'Missing required product image. Provide either assetKey or rawImageBase64.',
         },
         { status: 400 }
       );
     }
 
-    if (rawImageBase64.length > MAX_IMAGE_BASE64_LENGTH) {
+    if (assetKey && !validateWorkspaceKeyAccess(workspace.workspaceId, assetKey)) {
+      return Response.json(
+        {
+          success: false,
+          error: 'FORBIDDEN: Requested storage assetKey does not belong to active workspace',
+        },
+        { status: 403 }
+      );
+    }
+
+    if (rawImageBase64 && rawImageBase64.length > MAX_IMAGE_BASE64_LENGTH) {
       return Response.json(
         { success: false, error: 'Image payload exceeds 20MB limit' },
         { status: 413 }
       );
+    }
+
+    let effectiveAssetKey = assetKey;
+    if (!effectiveAssetKey && rawImageBase64.trim()) {
+      try {
+        const storage = getObjectStorage();
+        const { buffer, mimeType } = parseImageInput(rawImageBase64);
+        const ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
+        const uploadKey = buildUploadAssetKey(workspace.workspaceId, ext);
+        await storage.put(uploadKey, buffer, mimeType);
+        effectiveAssetKey = uploadKey;
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : 'Invalid image payload';
+        return Response.json({ success: false, error: errMsg }, { status: 400 });
+      }
     }
 
     const ledger = new CreditLedgerService();
@@ -120,7 +173,7 @@ export async function POST(request: Request) {
     ) as PlanTier;
     const plan = SUBSCRIPTION_PLANS[planTier];
 
-    // 2. Synthesize 10-component studio prompt targeting active Gemini model & validate plan entitlement
+    // 2. Synthesize studio prompt & validate plan entitlement
     const synthesized = PromptSynthesizer.synthesize({
       productTitle: productTitle.trim(),
       productCategory,
@@ -153,7 +206,10 @@ export async function POST(request: Request) {
       effectiveImageSize
     );
 
-    // 3. Create persistent Photoshoot & GenerationJob in SQL scoped to authenticated workspace
+    const preferHeader = request.headers.get('prefer')?.toLowerCase() || '';
+    const isAsync = preferHeader.includes('respond-async') || Boolean(body.async);
+
+    // 3. Create persistent Photoshoot & GenerationJob in SQL
     const jobRecord = await ledger.createPhotoshootJob({
       workspaceId: workspace.workspaceId,
       productName: productTitle.trim(),
@@ -165,9 +221,12 @@ export async function POST(request: Request) {
       rawPrompt: customDirectives ? `${productTitle}: ${customDirectives}` : productTitle,
       synthesizedPrompt: synthesized.fullPrompt,
       creditCost,
+      idempotencyKey,
+      assetKey: effectiveAssetKey,
+      status: isAsync ? 'QUEUED' : 'PROCESSING',
     });
 
-    // 4. Atomically reserve credits before AI execution (402 if insufficient)
+    // 4. Atomically reserve credits
     let reservation;
     try {
       reservation = await ledger.reserveCredits({
@@ -184,7 +243,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // 5. Execute real product image isolation, studio generation/compositing & fidelity verification
+    // 5. Handle async vs sync execution
+    if (isAsync) {
+      try {
+        const { after } = await import('next/server');
+        after(async () => {
+          await processGenerationJob(jobRecord.id);
+        });
+      } catch {
+        // Outside Next.js request context (e.g. node:test suite runner)
+      }
+
+      return Response.json(
+        {
+          success: true,
+          jobId: jobRecord.id,
+          photoshootId: jobRecord.photoshootId,
+          status: 'QUEUED',
+        },
+        { status: 202 }
+      );
+    }
+
+    // Synchronous execution (legacy flow)
     try {
       const gemini = new GeminiClient();
       const result = await gemini.generateProductPhoto(jobRecord.id, {
@@ -198,7 +279,6 @@ export async function POST(request: Request) {
         lockProductForeground,
       });
 
-      // 6. Settle credit reservation and persist GeneratedImage + COMPLETED job state
       const settlement = await ledger.settleReservation(reservation.id);
       const photoshootRepo = getPhotoshootRepository();
 
