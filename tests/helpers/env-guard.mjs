@@ -10,6 +10,12 @@ process.env.NODE_ENV = 'test';
 
 // Default overrides for local unit/integration tests
 process.env.SHOTISTRY_DB_DRIVER = process.env.SHOTISTRY_DB_DRIVER || 'sqlite';
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ||
+  'postgresql://postgres:postgres@localhost:5432/shotistry_test?schema=public';
+process.env.DIRECT_URL =
+  process.env.DIRECT_URL ||
+  process.env.DATABASE_URL;
 process.env.SHOTISTRY_RATE_LIMIT_BACKEND = 'memory';
 process.env.SHOTISTRY_TRUSTED_PROXY_COUNT = '0';
 process.env.SHOTISTRY_MAX_CONCURRENT_HASHES = '4';
