@@ -84,3 +84,4 @@ The staging environment exposes a public health telemetry endpoint:
 }
 ```
 If the database or critical configurations are missing in staging, the endpoint returns HTTP 503 `degraded`.
+

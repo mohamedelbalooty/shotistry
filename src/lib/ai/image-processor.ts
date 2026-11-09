@@ -208,10 +208,18 @@ export function detectSupportedImageMimeType(
 /**
  * Parses a base64 or Data URL string into raw bytes and verified MIME type (`image/png`, `image/jpeg`, `image/webp`).
  */
-export function parseImageInput(input: string): {
+export function parseImageInput(input: string | Buffer): {
   buffer: Buffer;
   mimeType: SupportedImageMimeType;
 } {
+  if (Buffer.isBuffer(input)) {
+    if (input.length < 12) {
+      throw new Error('Decoded product image buffer is too small');
+    }
+    const mimeType = detectSupportedImageMimeType(input);
+    return { buffer: input, mimeType };
+  }
+
   if (!input || typeof input !== 'string' || input.trim().length < 16) {
     throw new Error('Invalid or empty product image payload');
   }
@@ -241,7 +249,7 @@ export function parseImageInput(input: string): {
  * - Preserves real image pixels with zero synthetic hash fallbacks.
  * - Throws descriptive errors for unsupported formats or corrupt image streams.
  */
-export async function decodeProductImage(input: string): Promise<DecodedRgbaImage> {
+export async function decodeProductImage(input: string | Buffer): Promise<DecodedRgbaImage> {
   const { buffer, mimeType } = parseImageInput(input);
 
   try {

@@ -47,7 +47,9 @@
 | [`tests/live-external-smoke.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/live-external-smoke.test.mjs) | 4 | 0 | 0 | **4** | Live API Smoke (`GEMINI_API_KEY`, `PAYMOB_*`, `UPSTASH_*`, `RESEND_*`) | ⏸️ **BLOCKED** |
 | [`tests/test-env-hermetic.test.mjs`](file:///E:/GithubProjects/shotistry/tests/test-env-hermetic.test.mjs) | 1 | 1 | 0 | 0 | Unit (M0 Hermetic Test Environment Guarantee: Developer .env Isolation) | ✅ PASS |
 | [`tests/deploy-env-guards.test.mjs`](file:///E:/GithubProjects/shotistry/tests/deploy-env-guards.test.mjs) | 4 | 4 | 0 | 0 | Integration (Milestone M1 — Deployment Environment Model, Fail-Closed Guards & Health Endpoint) | ✅ PASS |
-| **Total Across All 26 Test Files (29 Suites)** | **160** | **142** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **142/142 Active Passing (14/14 Live PG)** |
+| [`tests/object-storage.test.mjs`](file:///E:/GithubProjects/shotistry/tests/object-storage.test.mjs) | 5 | 5 | 0 | 0 | Unit (Milestone M2 — Cloudflare R2 / S3 Object Storage Provider & Key Isolation) | ✅ PASS |
+| [`tests/asset-upload-flow.test.mjs`](file:///E:/GithubProjects/shotistry/tests/asset-upload-flow.test.mjs) | 4 | 4 | 0 | 0 | Integration (Milestone M2 — Presigned Upload Intent, Sharp Finalize, Presigned GET Access Control & Cron Storage Cleanup) | ✅ PASS |
+| **Total Across All 28 Test Files (31 Suites)** | **169** | **151** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **151/151 Active Passing (14/14 Live PG)** |
 
 ---
 
