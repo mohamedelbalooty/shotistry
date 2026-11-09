@@ -46,7 +46,8 @@
 | [`tests/postgres-ledger.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/postgres-ledger.test.mjs) | 4 | 4* | 0 | 0* | PostgreSQL 16 Integration (21 Tables, 9 Enums, `SERIALIZABLE` Double-Spending Prevention, Row-Level Locking) | ✅ **LIVE PG PASS** *(Sandbox Skips)* |
 | [`tests/live-external-smoke.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/live-external-smoke.test.mjs) | 4 | 0 | 0 | **4** | Live API Smoke (`GEMINI_API_KEY`, `PAYMOB_*`, `UPSTASH_*`, `RESEND_*`) | ⏸️ **BLOCKED** |
 | [`tests/test-env-hermetic.test.mjs`](file:///E:/GithubProjects/shotistry/tests/test-env-hermetic.test.mjs) | 1 | 1 | 0 | 0 | Unit (M0 Hermetic Test Environment Guarantee: Developer .env Isolation) | ✅ PASS |
-| **Total Across All 25 Test Files (28 Suites)** | **156** | **138** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **138/138 Active Passing (14/14 Live PG)** |
+| [`tests/deploy-env-guards.test.mjs`](file:///E:/GithubProjects/shotistry/tests/deploy-env-guards.test.mjs) | 4 | 4 | 0 | 0 | Integration (Milestone M1 — Deployment Environment Model, Fail-Closed Guards & Health Endpoint) | ✅ PASS |
+| **Total Across All 26 Test Files (29 Suites)** | **160** | **142** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **142/142 Active Passing (14/14 Live PG)** |
 
 ---
 

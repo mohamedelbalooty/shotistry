@@ -20,6 +20,7 @@ import {
   verifyDeliveredImageFidelity,
   getResolutionForAspectRatio,
 } from './image-processor.ts';
+import { isMockFallbackAllowed } from '../config/env.ts';
 
 export interface GenerateImageOptions {
   prompt: string;
@@ -150,6 +151,12 @@ export class GeminiClient {
     if (!options.referenceImageBase64 || options.referenceImageBase64.trim().length === 0) {
       throw new Error(
         'Product reference image (referenceImageBase64) is required for product photography generation'
+      );
+    }
+
+    if (!this.client && !isMockFallbackAllowed()) {
+      throw new Error(
+        'AI provider unavailable: GEMINI_API_KEY is required in staging and production environments'
       );
     }
 
@@ -298,6 +305,12 @@ export class GeminiClient {
         fidelityVerified: deliveredFidelity.fidelityVerified,
         completedAt,
       };
+    }
+
+    if (!isMockFallbackAllowed()) {
+      throw new Error(
+        'AI provider unavailable: GEMINI_API_KEY is required in staging and production environments'
+      );
     }
 
     // Stage 3: Prepare pixel-accurate studio composite preserving 100% of customer product foreground

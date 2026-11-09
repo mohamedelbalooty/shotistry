@@ -7,6 +7,7 @@ import { validateCsrfRequest } from '../../../../lib/security/csrf.ts';
 import { enforceRateLimitPolicies } from '../../../../lib/security/rate-limit.ts';
 import { requireVerifiedEmail } from '../../../../lib/auth/email-verification-guard.ts';
 import { getBillingRepository } from '../../../../lib/db/repositories/billing-repository.ts';
+import { isMockFallbackAllowed } from '../../../../lib/config/env.ts';
 import { POST as paymobWebhookPost } from '../../webhooks/paymob/route.ts';
 import type { PlanTier } from '../../../../lib/types/index.ts';
 
@@ -52,14 +53,17 @@ export async function POST(request: Request) {
       );
     }
 
-    if (body?.sandboxSimulateWebhook === true && process.env.NODE_ENV === 'production') {
-      return Response.json(
-        {
-          success: false,
-          error: 'FORBIDDEN: Sandbox webhook simulation is disabled in production',
-        },
-        { status: 403 }
-      );
+    if (body?.sandboxSimulateWebhook === true) {
+      if (!isMockFallbackAllowed() || process.env.NODE_ENV === 'production') {
+        return Response.json(
+          {
+            success: false,
+            error:
+              'FORBIDDEN: Sandbox webhook simulation is disabled in staging and production environments',
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const kind = body?.kind === 'TOP_UP' ? 'TOP_UP' : 'SUBSCRIPTION';

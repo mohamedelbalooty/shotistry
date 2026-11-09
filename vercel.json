@@ -1,0 +1,22 @@
+{
+  "framework": "nextjs",
+  "regions": ["fra1"],
+  "functions": {
+    "src/app/api/photoshoots/generate/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/jobs/[id]/route.ts": {
+      "maxDuration": 30
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/generation-reaper",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/storage-cleanup",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}

@@ -79,6 +79,7 @@ export interface AdminRepository {
     ipAddress?: string | null;
   }): Promise<void>;
   recordAuditLog(params: RecordAuditLogParams): Promise<void>;
+  ping(): Promise<boolean>;
 }
 
 export class SqliteAdminRepository implements AdminRepository {
@@ -323,6 +324,12 @@ export class SqliteAdminRepository implements AdminRepository {
         );
     });
   }
+
+  async ping(): Promise<boolean> {
+    const db = this.getDb();
+    const row = db.prepare('SELECT 1 as alive').get() as { alive: number } | undefined;
+    return row?.alive === 1;
+  }
 }
 
 export class PostgresAdminRepository implements AdminRepository {
@@ -545,6 +552,11 @@ export class PostgresAdminRepository implements AdminRepository {
         createdAt: new Date(),
       },
     });
+  }
+
+  async ping(): Promise<boolean> {
+    const res = await this.client.$queryRaw`SELECT 1 as alive`;
+    return Array.isArray(res) && res.length > 0;
   }
 }
 
