@@ -7,6 +7,20 @@ import type {
   PlanTier,
 } from '../types/index.ts';
 import { SUBSCRIPTION_PLANS } from './plans.ts';
+import {
+  STORAGE_AND_DELIVERY_COST_USD,
+  DEFAULT_RETRY_ALLOWANCE_RATE,
+  DEFAULT_EXPECTED_UTILIZATION_RATE,
+  FX_RATES_PER_USD,
+  calculatePaymobFee,
+} from './financial-config.ts';
+
+export {
+  STORAGE_AND_DELIVERY_COST_USD,
+  DEFAULT_RETRY_ALLOWANCE_RATE,
+  DEFAULT_EXPECTED_UTILIZATION_RATE,
+  FX_RATES_PER_USD,
+};
 
 export interface ServiceTierPricing {
   serviceTier: GeminiServiceTier;
@@ -73,15 +87,6 @@ export interface PlanProfitabilityReport {
   expectedGrossProfitLocal: number;
   expectedGrossMarginPercent: number;
 }
-
-export const STORAGE_AND_DELIVERY_COST_USD = 0.0005;
-export const DEFAULT_RETRY_ALLOWANCE_RATE = 0.03;
-export const DEFAULT_EXPECTED_UTILIZATION_RATE = 0.65;
-
-export const FX_RATES_PER_USD: Record<Country, number> = {
-  EG: 50.0,
-  SA: 3.75,
-};
 
 /**
  * Official Google Gemini API & Vertex AI Pricing Catalog for Image Generation Models
@@ -396,9 +401,11 @@ export function calculatePlanProfitability(
   const revenueLocal = country === 'SA' ? plan.priceSAR : plan.priceEGP;
   const revenueUsd = round2(revenueLocal / fxRatePerUsd);
 
-  // Paymob fee schedule: Egypt 2.75% + 3.00 EGP; Saudi Arabia 2.50% + 1.00 SAR
+  // Paymob fee schedule from centralized config: EG 2.75% + 3.00 EGP, SA 2.50% + 1.00 SAR
   const rawPaymobFeeLocal =
-    country === 'SA' ? revenueLocal * 0.025 + 1.0 : revenueLocal * 0.0275 + 3.0;
+    country === 'SA'
+      ? revenueLocal * 0.025 + 1.0
+      : revenueLocal * 0.0275 + 3.0;
   const paymobFeeLocal = round2(rawPaymobFeeLocal);
 
   const costBreakdown = calculateModelGenerationCost(modelId, imageSize, serviceTier);

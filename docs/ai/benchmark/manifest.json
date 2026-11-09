@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shotistry Commercial Benchmark Manifest",
+  "version": "1.0.0",
+  "targetMarkets": ["EG", "SA"],
+  "currencyUnits": ["EGP", "SAR"],
+  "evaluationRubric": "docs/ai/benchmark/rubric.md",
+  "categories": [
+    {
+      "id": "cat_perfume",
+      "name": "Perfume, Fragrance & Oud",
+      "nameAr": "العطور والعود والبخور",
+      "riskProfile": "High (glass refractions, gold foiled labels, liquid caustics)",
+      "products": [
+        {
+          "id": "prod_oud_royal",
+          "title": "Royal Cambodian Oud Extract 50ml",
+          "presetIds": ["gulf_luxury_marble", "ramadan_eid_heritage", "studio_minimalist_pure"],
+          "aspectRatios": ["1:1", "4:5", "9:16"],
+          "fidelityThreshold": 0.95,
+          "lockForegroundRecommended": true
+        },
+        {
+          "id": "prod_rose_perfume",
+          "title": "Taif Rose Eau De Parfum 100ml",
+          "presetIds": ["editorial_monochrome_vogue", "gulf_luxury_marble"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.95,
+          "lockForegroundRecommended": true
+        }
+      ]
+    },
+    {
+      "id": "cat_cosmetics",
+      "name": "Cosmetics, Serums & Skincare",
+      "nameAr": "مستحضرات التجميل والعناية بالبشرة",
+      "riskProfile": "High (frosted glass, fine micro-typography on dropper bottles)",
+      "products": [
+        {
+          "id": "prod_hyaluronic_serum",
+          "title": "Hydra-Glow Vitamin C Serum 30ml",
+          "presetIds": ["studio_minimalist_pure", "gulf_luxury_marble"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.95,
+          "lockForegroundRecommended": true
+        }
+      ]
+    },
+    {
+      "id": "cat_fashion",
+      "name": "Fashion, Leather Goods & Apparel",
+      "nameAr": "الأزياء والمنتجات الجلدية",
+      "riskProfile": "Medium (fabric weave, stitching, zipper reflection)",
+      "products": [
+        {
+          "id": "prod_leather_wallet",
+          "title": "Handcrafted Camel Leather Cardholder",
+          "presetIds": ["editorial_monochrome_vogue", "gulf_luxury_marble"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.90,
+          "lockForegroundRecommended": false
+        }
+      ]
+    },
+    {
+      "id": "cat_jewelry",
+      "name": "Jewelry, Watches & Accessories",
+      "nameAr": "المجوهرات والساعات والإكسسوارات",
+      "riskProfile": "Very High (gemstone facets, metallic specular highlights, tiny hallmarks)",
+      "products": [
+        {
+          "id": "prod_gold_bangle",
+          "title": "18K Gold Engraved Arabesque Bangle",
+          "presetIds": ["gulf_luxury_marble", "ramadan_eid_heritage"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.98,
+          "lockForegroundRecommended": true
+        }
+      ]
+    },
+    {
+      "id": "cat_food_beverage",
+      "name": "Food, Coffee, Dates & Gourmet Products",
+      "nameAr": "الأغذية والقهوة والتمور الفاخرة",
+      "riskProfile": "Medium (packaging integrity, organic item realism)",
+      "products": [
+        {
+          "id": "prod_medjool_box",
+          "title": "Saudi Sagai Stuffed Dates Gift Box 500g",
+          "presetIds": ["ramadan_eid_heritage", "gulf_luxury_marble"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.92,
+          "lockForegroundRecommended": false
+        }
+      ]
+    },
+    {
+      "id": "cat_glass_transparent",
+      "name": "Glass & Transparent Containers",
+      "nameAr": "الزجاج والعبوات الشفافة",
+      "riskProfile": "High (background showing through container, refraction distortion)",
+      "products": [
+        {
+          "id": "prod_olive_oil",
+          "title": "Sinai Extra Virgin Olive Oil 500ml",
+          "presetIds": ["mediterranean_sun_coastal", "studio_minimalist_pure"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.95,
+          "lockForegroundRecommended": true
+        }
+      ]
+    },
+    {
+      "id": "cat_reflective",
+      "name": "Metallic & Reflective Surface Items",
+      "nameAr": "الأسطح المعدنية والعاكسة",
+      "riskProfile": "High (room reflections, mirror-like specular highlights)",
+      "products": [
+        {
+          "id": "prod_brass_incense_burner",
+          "title": "Traditional Engraved Brass Mabkhara",
+          "presetIds": ["ramadan_eid_heritage", "gulf_luxury_marble"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.95,
+          "lockForegroundRecommended": true
+        }
+      ]
+    },
+    {
+      "id": "cat_fmcg_packaged",
+      "name": "Packaged FMCG & Retail Goods",
+      "nameAr": "السلع الاستهلاكية المعبأة",
+      "riskProfile": "Low-to-Medium (box corners, barcodes, nutritional badges)",
+      "products": [
+        {
+          "id": "prod_tea_tin",
+          "title": "Egyptian Herbal Hibiscus Tea Tin 250g",
+          "presetIds": ["studio_minimalist_pure", "ramadan_eid_heritage"],
+          "aspectRatios": ["1:1", "4:5"],
+          "fidelityThreshold": 0.92,
+          "lockForegroundRecommended": false
+        }
+      ]
+    }
+  ]
+}
+
