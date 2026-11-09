@@ -19,6 +19,9 @@ import {
   enforceRateLimitPolicies,
 } from '../../../../lib/security/rate-limit.ts';
 import type { PlatformRole } from '../../../../lib/types/index.ts';
+import { createScopedLogger } from '../../../../lib/observability/logger.ts';
+
+const logger = createScopedLogger('auth:login');
 
 const loginSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -117,7 +120,7 @@ export async function POST(request: Request) {
         });
       } catch (rehashError) {
         // Transparent rehash error must not fail user login
-        console.error('Failed to transparently rehash password:', rehashError);
+        logger.error('Failed to transparently rehash password', rehashError);
       }
     }
 

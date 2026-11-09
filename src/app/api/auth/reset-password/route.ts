@@ -9,6 +9,9 @@ import { enforceRateLimitPolicies } from '../../../../lib/security/rate-limit.ts
 import { getClientIp } from '../../../../lib/security/rate-limit/client-ip.ts';
 import { getEmailTransport } from '../../../../lib/email/index.ts';
 import { renderPasswordChangedNoticeTemplate } from '../../../../lib/email/templates.ts';
+import { createScopedLogger } from '../../../../lib/observability/logger.ts';
+
+const logger = createScopedLogger('auth:reset-password');
 
 const resetPasswordSchema = z.object({
   token: z.string().min(1).max(512),
@@ -122,7 +125,7 @@ export async function POST(request: Request) {
         idempotencyKey: `pw-reset-notice:${user.id}:${Date.now()}`,
       });
     } catch (emailErr) {
-      console.error('Failed to send password changed notice email:', emailErr);
+      logger.error('Failed to send password changed notice email', emailErr);
     }
 
     const clearCookie = buildClearSessionCookieHeader();

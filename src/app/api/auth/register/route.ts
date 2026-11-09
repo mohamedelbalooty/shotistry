@@ -8,6 +8,9 @@ import {
   getEmailTransport,
   renderVerifyEmailTemplate,
 } from '../../../../lib/email/index.ts';
+import { createScopedLogger } from '../../../../lib/observability/logger.ts';
+
+const logger = createScopedLogger('auth:register');
 import { validateSameOrigin } from '../../../../lib/security/csrf.ts';
 import {
   getClientIp,
@@ -140,7 +143,7 @@ export async function POST(request: Request) {
       verificationEmailSent = true;
     } catch (emailErr) {
       // Registration succeeds even if email transport fails or is unconfigured
-      console.error('Failed to dispatch initial verification email:', emailErr);
+      logger.error('Failed to dispatch initial verification email', emailErr);
     }
 
     return Response.json(

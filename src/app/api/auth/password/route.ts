@@ -15,6 +15,9 @@ import { enforceRateLimitPolicies } from '../../../../lib/security/rate-limit.ts
 import { getClientIp } from '../../../../lib/security/rate-limit/client-ip.ts';
 import { getEmailTransport } from '../../../../lib/email/index.ts';
 import { renderPasswordChangedNoticeTemplate } from '../../../../lib/email/templates.ts';
+import { createScopedLogger } from '../../../../lib/observability/logger.ts';
+
+const logger = createScopedLogger('auth:password');
 
 const passwordSchema = z.object({
   currentPassword: z.string().min(1).max(128),
@@ -103,7 +106,7 @@ export async function POST(request: Request) {
         idempotencyKey: `pw-changed:${session.userId}:${Date.now()}`,
       });
     } catch (emailErr) {
-      console.error('Failed to dispatch password changed notice email:', emailErr);
+      logger.error('Failed to dispatch password changed notice email', emailErr);
     }
 
     return Response.json(

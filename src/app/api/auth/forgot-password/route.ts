@@ -7,6 +7,9 @@ import { enforceRateLimitPolicies } from '../../../../lib/security/rate-limit.ts
 import { getClientIp } from '../../../../lib/security/rate-limit/client-ip.ts';
 import { getEmailTransport } from '../../../../lib/email/index.ts';
 import { renderPasswordResetTemplate } from '../../../../lib/email/templates.ts';
+import { createScopedLogger } from '../../../../lib/observability/logger.ts';
+
+const logger = createScopedLogger('auth:forgot-password');
 
 const forgotPasswordSchema = z.object({
   email: z.string().trim().email().max(255),
@@ -84,7 +87,7 @@ export async function POST(request: Request) {
             idempotencyKey: `pw-reset:${user.id}:${rawToken.slice(0, 16)}`,
           });
         } catch (emailErr) {
-          console.error('Failed to send password reset email:', emailErr);
+          logger.error('Failed to send password reset email', emailErr);
         }
       } else if (user.role === 'ADMIN' || user.role === 'SUPPORT') {
         // Privileged roles cannot reset password via self-service email flow
