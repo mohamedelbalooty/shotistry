@@ -1,10 +1,11 @@
 # Test Execution Results & Verification Record
 
 ## 1. Test Suite Execution Summary
-- **Primary Runner:** `npm test` (`node --experimental-strip-types --test tests/*.test.mjs`)
-- **Latest Execution Scope:** **155 tests across 27 describe suites in 21 test files**
-- **Sandboxed Execution Result (`audit/production-readiness`):** **137 Passed / 0 Failed / 18 Skipped**
-  - **137 Passed (Active Tests):** Unit, Contract (mocked), Sharp Image Pipeline, Option A Session Auth & Lifecycle, Multi-Tier RBAC Route Enforcement, CSRF, Rate Limits, CLI Admin Bootstrap, Fail-Closed Paymob Webhooks, Full E2E Workflows, Dual-Driver Repositories & Architecture Guards (Phase 1), Native Argon2id Password Hashing & Semaphore (Phase 2), Fail-Closed Distributed Rate Limiting (Phase 3), Transactional Email Transport & Bilingual Templates (Phase 4), Action Token Lifecycle & Email Verification (Phase 5), Account Recovery & Token-Leakage Headers (Phase 6), Verified-Email Gating & Workspace Invites (Phase 7).
+- **Primary Runner:** `npm test` (`node --import ./tests/helpers/env-guard.mjs --experimental-strip-types --test tests/*.test.mjs`)
+- **Full Verification Suite:** `npm run verify` (`prisma validate && tsc --noEmit && next lint && npm test && next build`)
+- **Latest Execution Scope:** **156 tests across 28 describe suites in 25 test files**
+- **Sandboxed Execution Result (`phase10/m0-local-verification`):** **138 Passed / 0 Failed / 18 Skipped**
+  - **138 Passed (Active Tests):** Hermetic Test Environment Guarantee (M0 Baseline), Unit, Contract (mocked), Sharp Image Pipeline, Option A Session Auth & Lifecycle, Multi-Tier RBAC Route Enforcement, CSRF, Rate Limits, CLI Admin Bootstrap, Fail-Closed Paymob Webhooks, Full E2E Workflows, Dual-Driver Repositories & Architecture Guards (Phase 1), Native Argon2id Password Hashing & Semaphore (Phase 2), Fail-Closed Distributed Rate Limiting (Phase 3), Transactional Email Transport & Bilingual Templates (Phase 4), Action Token Lifecycle & Email Verification (Phase 5), Account Recovery & Token-Leakage Headers (Phase 6), Verified-Email Gating & Workspace Invites (Phase 7).
   - **14 Skipped in Sandboxed Run (`tests/postgres-auth.test.mjs` [10], `tests/postgres-ledger.test.mjs` [4]):** `localhost:5432` PostgreSQL socket is blocked by default network sandbox isolation.
   - **4 Skipped (`tests/live-external-smoke.test.mjs`):** External credential-gated smoke tests (Gemini API, Paymob Secret Key, Upstash Redis REST, Resend API Key).
 - **Live PostgreSQL 16 Execution Record (`npm run test:pg`):**
@@ -44,7 +45,8 @@
 | [`tests/postgres-auth.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/postgres-auth.test.mjs) | 10 | 10* | 0 | 0* | PostgreSQL 16 CI Gate: Clean Migrations, Session Lifecycle, Concurrent Registrations, Atomic Provisioning, Trial Idempotency, 20 Concurrent Logins, RBAC Persistence, 50 Concurrent Rate Limits, Token Consumption Race, Admin Bootstrap | ✅ **LIVE PG PASS** *(Sandbox Skips)* |
 | [`tests/postgres-ledger.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/postgres-ledger.test.mjs) | 4 | 4* | 0 | 0* | PostgreSQL 16 Integration (21 Tables, 9 Enums, `SERIALIZABLE` Double-Spending Prevention, Row-Level Locking) | ✅ **LIVE PG PASS** *(Sandbox Skips)* |
 | [`tests/live-external-smoke.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/live-external-smoke.test.mjs) | 4 | 0 | 0 | **4** | Live API Smoke (`GEMINI_API_KEY`, `PAYMOB_*`, `UPSTASH_*`, `RESEND_*`) | ⏸️ **BLOCKED** |
-| **Total Across All 21 Test Files (27 Suites)** | **155** | **137** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **137/137 Active Passing (14/14 Live PG)** |
+| [`tests/test-env-hermetic.test.mjs`](file:///E:/GithubProjects/shotistry/tests/test-env-hermetic.test.mjs) | 1 | 1 | 0 | 0 | Unit (M0 Hermetic Test Environment Guarantee: Developer .env Isolation) | ✅ PASS |
+| **Total Across All 25 Test Files (28 Suites)** | **156** | **138** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **138/138 Active Passing (14/14 Live PG)** |
 
 ---
 

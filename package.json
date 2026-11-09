@@ -11,8 +11,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs",
-    "test:pg": "REQUIRE_POSTGRES_TESTS=1 SHOTISTRY_DB_DRIVER=postgres node --experimental-strip-types --test tests/postgres-*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./tests/helpers/env-guard.mjs --experimental-strip-types --test tests/*.test.mjs",
+    "test:pg": "node --experimental-strip-types scripts/run-pg-tests.mjs",
+    "verify": "npx prisma validate && npm run typecheck && npm run lint && npm test && npm run build",
+    "verify:all": "npm run verify && npm run test:pg",
     "seed": "node --experimental-strip-types scripts/seed-test-accounts.mjs"
   },
   "dependencies": {
@@ -31,6 +34,8 @@
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.0.3",
     "postcss": "^8.4.49",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.15",
