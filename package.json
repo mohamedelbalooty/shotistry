@@ -16,6 +16,7 @@
     "test:pg": "node --experimental-strip-types scripts/run-pg-tests.mjs",
     "verify": "npx prisma validate && npm run typecheck && npm run lint && npm test && npm run build",
     "verify:all": "npm run verify && npm run test:pg",
+    "test:e2e": "playwright test",
     "seed": "node --experimental-strip-types scripts/seed-test-accounts.mjs"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
