@@ -208,6 +208,10 @@ CREATE TABLE IF NOT EXISTS "Subscription" (
   "monthlyCredits" INTEGER NOT NULL DEFAULT 5,
   "paymobSubscriptionId" TEXT UNIQUE,
   "paymobCardToken" TEXT,
+  "region" TEXT NOT NULL DEFAULT 'EG',
+  "paymobPlanId" TEXT,
+  "lastRenewalAt" TEXT,
+  "failedAttempts" INTEGER NOT NULL DEFAULT 0,
   "currentPeriodStart" TEXT NOT NULL,
   "currentPeriodEnd" TEXT NOT NULL,
   "cancelAtPeriodEnd" INTEGER NOT NULL DEFAULT 0,
@@ -249,8 +253,15 @@ CREATE TABLE IF NOT EXISTS "PaymentTransaction" (
   "workspaceId" TEXT NOT NULL,
   "amountCents" INTEGER NOT NULL,
   "currency" TEXT NOT NULL,
+  "kind" TEXT NOT NULL DEFAULT 'TOP_UP',
+  "planTier" TEXT,
+  "packId" TEXT,
+  "credits" INTEGER NOT NULL DEFAULT 0,
+  "region" TEXT NOT NULL DEFAULT 'EG',
   "paymobOrderId" TEXT UNIQUE,
   "paymobTxnId" TEXT UNIQUE,
+  "intentionId" TEXT UNIQUE,
+  "specialReference" TEXT UNIQUE,
   "paymentMethod" TEXT,
   "status" TEXT NOT NULL,
   "errorMessage" TEXT,
@@ -379,6 +390,51 @@ function ensureSqliteColumnMigrations(db: DatabaseSync): void {
   }
   if (!jobCols.has('costUsdMicros')) {
     db.exec(`ALTER TABLE "GenerationJob" ADD COLUMN "costUsdMicros" INTEGER;`);
+  }
+
+  const txnCols = new Set(
+    (db.prepare(`PRAGMA table_info("PaymentTransaction")`).all() as Array<{ name: string }>).map(
+      (col) => col.name
+    )
+  );
+  if (!txnCols.has('kind')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "kind" TEXT NOT NULL DEFAULT 'TOP_UP';`);
+  }
+  if (!txnCols.has('planTier')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "planTier" TEXT;`);
+  }
+  if (!txnCols.has('packId')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "packId" TEXT;`);
+  }
+  if (!txnCols.has('credits')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "credits" INTEGER NOT NULL DEFAULT 0;`);
+  }
+  if (!txnCols.has('region')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "region" TEXT NOT NULL DEFAULT 'EG';`);
+  }
+  if (!txnCols.has('intentionId')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "intentionId" TEXT;`);
+  }
+  if (!txnCols.has('specialReference')) {
+    db.exec(`ALTER TABLE "PaymentTransaction" ADD COLUMN "specialReference" TEXT;`);
+  }
+
+  const subCols = new Set(
+    (db.prepare(`PRAGMA table_info("Subscription")`).all() as Array<{ name: string }>).map(
+      (col) => col.name
+    )
+  );
+  if (!subCols.has('region')) {
+    db.exec(`ALTER TABLE "Subscription" ADD COLUMN "region" TEXT NOT NULL DEFAULT 'EG';`);
+  }
+  if (!subCols.has('paymobPlanId')) {
+    db.exec(`ALTER TABLE "Subscription" ADD COLUMN "paymobPlanId" TEXT;`);
+  }
+  if (!subCols.has('lastRenewalAt')) {
+    db.exec(`ALTER TABLE "Subscription" ADD COLUMN "lastRenewalAt" TEXT;`);
+  }
+  if (!subCols.has('failedAttempts')) {
+    db.exec(`ALTER TABLE "Subscription" ADD COLUMN "failedAttempts" INTEGER NOT NULL DEFAULT 0;`);
   }
 }
 

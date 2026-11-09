@@ -63,6 +63,7 @@ enum LedgerTransactionType {
   JOB_SETTLEMENT
   JOB_REFUND
   ADMIN_ADJUSTMENT
+  REFUND_REVERSAL
 }
 
 enum AuthActionTokenType {
@@ -292,6 +293,10 @@ model Subscription {
   monthlyCredits       Int                @default(5)
   paymobSubscriptionId String?            @unique
   paymobCardToken      String?
+  region               String             @default("EG")
+  paymobPlanId         String?
+  lastRenewalAt        DateTime?
+  failedAttempts       Int                @default(0)
   currentPeriodStart   DateTime           @default(now())
   currentPeriodEnd     DateTime
   cancelAtPeriodEnd    Boolean            @default(false)
@@ -331,18 +336,25 @@ model CreditReservation {
 }
 
 model PaymentTransaction {
-  id            String    @id @default(uuid())
-  workspaceId   String
-  amountCents   Int
-  currency      Currency
-  paymobOrderId String?   @unique
-  paymobTxnId   String?   @unique
-  paymentMethod String?
-  status        String
-  errorMessage  String?
-  createdAt     DateTime  @default(now())
+  id               String    @id @default(uuid())
+  workspaceId      String
+  amountCents      Int
+  currency         Currency
+  kind             String    @default("TOP_UP")
+  planTier         PlanTier?
+  packId           String?
+  credits          Int       @default(0)
+  region           String    @default("EG")
+  paymobOrderId    String?   @unique
+  paymobTxnId      String?   @unique
+  intentionId      String?   @unique
+  specialReference String?   @unique
+  paymentMethod    String?
+  status           String
+  errorMessage     String?
+  createdAt        DateTime  @default(now())
 
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model WebhookEvent {

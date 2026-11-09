@@ -30,7 +30,8 @@ export type LedgerTransactionType =
   | 'TOP_UP_PURCHASE'
   | 'JOB_SETTLEMENT'
   | 'JOB_REFUND'
-  | 'ADMIN_ADJUSTMENT';
+  | 'ADMIN_ADJUSTMENT'
+  | 'REFUND_REVERSAL';
 
 export type AspectRatio = '1:1' | '4:5' | '9:16' | '16:9';
 

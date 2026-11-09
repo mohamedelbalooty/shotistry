@@ -24,28 +24,49 @@ export interface ProcessSubscriptionEventOutcome {
   subscriptionStatus: string;
 }
 
+export interface StoredIntentInfo {
+  id: string;
+  workspaceId: string;
+  amountCents: number;
+  currency: string;
+  kind: string;
+  planTier: PlanTier | null;
+  packId: string | null;
+  credits: number;
+  region: string;
+  status: string;
+}
+
 export interface ProcessTransactionEventInput {
   eventId: string;
   payloadHash: string;
   rawBody: string;
   paymobTxnId: string;
   paymobOrderId: string | null;
-  workspaceId: string;
+  specialReference?: string | null;
+  workspaceId?: string;
   currency: 'EGP' | 'SAR';
   amountCents: number;
   paymentMethod: string;
   isSuccess: boolean;
+  isRefunded?: boolean;
+  isVoided?: boolean;
 }
 
 export interface ProcessTransactionEventOutcome {
   duplicate: boolean;
   transactionStatus: string;
+  storedIntent?: StoredIntentInfo | null;
+  errorMessage?: string;
 }
 
 export interface WebhookRepository {
   workspaceExists(workspaceId: string): Promise<boolean>;
   findSubscriptionWorkspace(paymobSubId: string): Promise<string | null>;
   findTransactionWorkspace(paymobOrderId: string): Promise<string | null>;
+  findPendingTransactionByOrderIdOrSpecialRef(
+    reference: string
+  ): Promise<StoredIntentInfo | null>;
   processSubscriptionEvent(
     input: ProcessSubscriptionEventInput
   ): Promise<ProcessSubscriptionEventOutcome>;
@@ -86,6 +107,21 @@ export class SqliteWebhookRepository implements WebhookRepository {
       .prepare(`SELECT "workspaceId" FROM "PaymentTransaction" WHERE "paymobOrderId" = ?`)
       .get(paymobOrderId) as { workspaceId: string } | undefined;
     return row?.workspaceId ?? null;
+  }
+
+  async findPendingTransactionByOrderIdOrSpecialRef(
+    reference: string
+  ): Promise<StoredIntentInfo | null> {
+    const db = this.getDb();
+    const row = db
+      .prepare(
+        `SELECT "id", "workspaceId", "amountCents", "currency", "kind", "planTier",
+                "packId", "credits", "region", "status"
+         FROM "PaymentTransaction"
+         WHERE "paymobOrderId" = ? OR "specialReference" = ? OR "id" = ? OR "intentionId" = ?`
+      )
+      .get(reference, reference, reference, reference) as StoredIntentInfo | undefined;
+    return row ?? null;
   }
 
   async processSubscriptionEvent(
@@ -190,9 +226,9 @@ export class SqliteWebhookRepository implements WebhookRepository {
         .prepare(`SELECT "id", "processed" FROM "WebhookEvent" WHERE "eventId" = ?`)
         .get(input.eventId) as { id: string; processed: number } | undefined;
 
-      const status = input.isSuccess ? 'SUCCEEDED' : 'FAILED';
+      const fallbackStatus = input.isSuccess ? 'SUCCEEDED' : 'FAILED';
       if (existingEvent && existingEvent.processed === 1) {
-        return { duplicate: true, transactionStatus: status };
+        return { duplicate: true, transactionStatus: fallbackStatus };
       }
 
       const now = new Date().toISOString();
@@ -215,13 +251,73 @@ export class SqliteWebhookRepository implements WebhookRepository {
         ).run(now, existingEvent.id);
       }
 
-      const existingTxn = input.paymobOrderId
-        ? (db
-            .prepare(`SELECT "id" FROM "PaymentTransaction" WHERE "paymobOrderId" = ?`)
-            .get(input.paymobOrderId) as { id: string } | undefined)
-        : undefined;
+      // 1. Resolve stored intent strictly by specialReference, paymobOrderId, or id
+      let storedTxn: StoredIntentInfo | undefined = undefined;
+      if (input.specialReference) {
+        storedTxn = db
+          .prepare(
+            `SELECT "id", "workspaceId", "amountCents", "currency", "kind", "planTier",
+                    "packId", "credits", "region", "status"
+             FROM "PaymentTransaction"
+             WHERE "specialReference" = ? OR "id" = ?`
+          )
+          .get(input.specialReference, input.specialReference) as StoredIntentInfo | undefined;
+      }
+      if (!storedTxn && input.paymobOrderId) {
+        storedTxn = db
+          .prepare(
+            `SELECT "id", "workspaceId", "amountCents", "currency", "kind", "planTier",
+                    "packId", "credits", "region", "status"
+             FROM "PaymentTransaction"
+             WHERE "paymobOrderId" = ?`
+          )
+          .get(input.paymobOrderId) as StoredIntentInfo | undefined;
+      }
 
-      if (existingTxn) {
+      const isStrict =
+        process.env.SHOTISTRY_STRICT_PAYMENT_INTENT === '1' ||
+        process.env.SHOTISTRY_DEPLOY_ENV === 'staging' ||
+        process.env.NODE_ENV === 'production';
+
+      if (!storedTxn && isStrict) {
+        return {
+          duplicate: false,
+          transactionStatus: 'UNMATCHED_INTENT',
+          storedIntent: null,
+          errorMessage: 'No pending payment transaction matches reference in strict intent mode',
+        };
+      }
+
+      if (storedTxn) {
+        if (storedTxn.amountCents !== input.amountCents || storedTxn.currency !== input.currency) {
+          db.prepare(
+            `UPDATE "PaymentTransaction"
+             SET "paymobTxnId" = ?, "status" = 'UNMATCHED_AMOUNT',
+                 "errorMessage" = ?
+             WHERE "id" = ?`
+          ).run(
+            input.paymobTxnId,
+            `Amount or currency mismatch: expected ${storedTxn.amountCents} ${storedTxn.currency}, received ${input.amountCents} ${input.currency}`,
+            storedTxn.id
+          );
+
+          return {
+            duplicate: false,
+            transactionStatus: 'UNMATCHED_AMOUNT',
+            storedIntent: storedTxn,
+            errorMessage: `Amount mismatch: expected ${storedTxn.amountCents} ${storedTxn.currency}, received ${input.amountCents} ${input.currency}`,
+          };
+        }
+
+        let status = 'FAILED';
+        if (input.isRefunded) {
+          status = 'REFUNDED';
+        } else if (input.isVoided) {
+          status = 'VOIDED';
+        } else if (input.isSuccess) {
+          status = 'SUCCEEDED';
+        }
+
         db.prepare(
           `UPDATE "PaymentTransaction"
            SET "paymobTxnId" = ?, "status" = ?, "errorMessage" = ?
@@ -229,28 +325,34 @@ export class SqliteWebhookRepository implements WebhookRepository {
         ).run(
           input.paymobTxnId,
           status,
-          input.isSuccess ? null : 'Transaction reported success=false',
-          existingTxn.id
+          input.isSuccess && !input.isRefunded && !input.isVoided
+            ? null
+            : 'Transaction reported failure, refund, or void',
+          storedTxn.id
         );
-      } else {
-        db.prepare(
-          `INSERT OR IGNORE INTO "PaymentTransaction" (
-             "id", "workspaceId", "amountCents", "currency", "paymobOrderId",
-             "paymobTxnId", "paymentMethod", "status", "errorMessage", "createdAt"
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          `pt-${crypto.randomUUID()}`,
-          input.workspaceId,
-          input.amountCents,
-          input.currency,
-          input.paymobOrderId,
-          input.paymobTxnId,
-          input.paymentMethod,
-          status,
-          input.isSuccess ? null : 'Transaction reported success=false',
-          now
-        );
+
+        return { duplicate: false, transactionStatus: status, storedIntent: storedTxn };
       }
+
+      // Legacy fallback for non-strict testing mode
+      let status = input.isSuccess ? 'SUCCEEDED' : 'FAILED';
+      db.prepare(
+        `INSERT OR IGNORE INTO "PaymentTransaction" (
+           "id", "workspaceId", "amountCents", "currency", "paymobOrderId",
+           "paymobTxnId", "paymentMethod", "status", "errorMessage", "createdAt"
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        `pt-${crypto.randomUUID()}`,
+        input.workspaceId || '',
+        input.amountCents,
+        input.currency,
+        input.paymobOrderId,
+        input.paymobTxnId,
+        input.paymentMethod,
+        status,
+        input.isSuccess ? null : 'Transaction reported success=false',
+        now
+      );
 
       return { duplicate: false, transactionStatus: status };
     });
@@ -301,6 +403,33 @@ export class PostgresWebhookRepository implements WebhookRepository {
       select: { workspaceId: true },
     });
     return txn?.workspaceId ?? null;
+  }
+
+  async findPendingTransactionByOrderIdOrSpecialRef(
+    reference: string
+  ): Promise<StoredIntentInfo | null> {
+    const row = await this.client.paymentTransaction.findFirst({
+      where: {
+        OR: [
+          { paymobOrderId: reference },
+          { specialReference: reference },
+          { id: reference },
+        ],
+      },
+    });
+    if (!row) return null;
+    return {
+      id: row.id,
+      workspaceId: row.workspaceId,
+      amountCents: row.amountCents,
+      currency: row.currency,
+      kind: row.kind,
+      planTier: row.planTier as PlanTier | null,
+      packId: row.packId,
+      credits: row.credits,
+      region: row.region,
+      status: row.status,
+    };
   }
 
   async processSubscriptionEvent(
@@ -396,9 +525,9 @@ export class PostgresWebhookRepository implements WebhookRepository {
         where: { eventId: input.eventId },
       });
 
-      const status = input.isSuccess ? 'SUCCEEDED' : 'FAILED';
+      const fallbackStatus = input.isSuccess ? 'SUCCEEDED' : 'FAILED';
       if (existingEvent && existingEvent.processed) {
-        return { duplicate: true, transactionStatus: status };
+        return { duplicate: true, transactionStatus: fallbackStatus };
       }
 
       const now = new Date();
@@ -422,39 +551,125 @@ export class PostgresWebhookRepository implements WebhookRepository {
         });
       }
 
-      const existingTxn = input.paymobOrderId
-        ? await tx.paymentTransaction.findUnique({
-            where: { paymobOrderId: input.paymobOrderId },
-          })
-        : null;
-
-      if (existingTxn) {
-        await tx.paymentTransaction.update({
-          where: { id: existingTxn.id },
-          data: {
-            paymobTxnId: input.paymobTxnId,
-            status,
-            errorMessage: input.isSuccess ? null : 'Transaction reported success=false',
+      // 1. Resolve stored intent strictly
+      let storedTxn: StoredIntentInfo | null = null;
+      if (input.specialReference) {
+        const found = await tx.paymentTransaction.findFirst({
+          where: {
+            OR: [
+              { specialReference: input.specialReference },
+              { id: input.specialReference },
+            ],
           },
         });
-      } else {
-        await tx.paymentTransaction.create({
-          data: {
-            id: `pt-${crypto.randomUUID()}`,
-            workspaceId: input.workspaceId,
-            amountCents: input.amountCents,
-            currency: input.currency,
-            paymobOrderId: input.paymobOrderId,
-            paymobTxnId: input.paymobTxnId,
-            paymentMethod: input.paymentMethod,
-            status,
-            errorMessage: input.isSuccess ? null : 'Transaction reported success=false',
-            createdAt: now,
-          },
+        if (found) {
+          storedTxn = {
+            id: found.id,
+            workspaceId: found.workspaceId,
+            amountCents: found.amountCents,
+            currency: found.currency,
+            kind: found.kind,
+            planTier: found.planTier as PlanTier | null,
+            packId: found.packId,
+            credits: found.credits,
+            region: found.region,
+            status: found.status,
+          };
+        }
+      }
+      if (!storedTxn && input.paymobOrderId) {
+        const found = await tx.paymentTransaction.findUnique({
+          where: { paymobOrderId: input.paymobOrderId },
         });
+        if (found) {
+          storedTxn = {
+            id: found.id,
+            workspaceId: found.workspaceId,
+            amountCents: found.amountCents,
+            currency: found.currency,
+            kind: found.kind,
+            planTier: found.planTier as PlanTier | null,
+            packId: found.packId,
+            credits: found.credits,
+            region: found.region,
+            status: found.status,
+          };
+        }
       }
 
-      return { duplicate: false, transactionStatus: status };
+      const isStrict =
+        process.env.SHOTISTRY_STRICT_PAYMENT_INTENT === '1' ||
+        process.env.SHOTISTRY_DEPLOY_ENV === 'staging' ||
+        process.env.NODE_ENV === 'production';
+
+      if (!storedTxn && isStrict) {
+        return {
+          duplicate: false,
+          transactionStatus: 'UNMATCHED_INTENT',
+          storedIntent: null,
+          errorMessage: 'No pending payment transaction matches reference in strict intent mode',
+        };
+      }
+
+      if (storedTxn) {
+        if (storedTxn.amountCents !== input.amountCents || storedTxn.currency !== input.currency) {
+          await tx.paymentTransaction.update({
+            where: { id: storedTxn.id },
+            data: {
+              paymobTxnId: input.paymobTxnId,
+              status: 'UNMATCHED_AMOUNT',
+              errorMessage: `Amount or currency mismatch: expected ${storedTxn.amountCents} ${storedTxn.currency}, received ${input.amountCents} ${input.currency}`,
+            },
+          });
+          return {
+            duplicate: false,
+            transactionStatus: 'UNMATCHED_AMOUNT',
+            storedIntent: storedTxn,
+            errorMessage: `Amount mismatch: expected ${storedTxn.amountCents} ${storedTxn.currency}, received ${input.amountCents} ${input.currency}`,
+          };
+        }
+
+        let status = 'FAILED';
+        if (input.isRefunded) {
+          status = 'REFUNDED';
+        } else if (input.isVoided) {
+          status = 'VOIDED';
+        } else if (input.isSuccess) {
+          status = 'SUCCEEDED';
+        }
+
+        await tx.paymentTransaction.update({
+          where: { id: storedTxn.id },
+          data: {
+            paymobTxnId: input.paymobTxnId,
+            status,
+            errorMessage: input.isSuccess && !input.isRefunded && !input.isVoided
+              ? null
+              : 'Transaction reported failure, refund, or void',
+          },
+        });
+
+        return { duplicate: false, transactionStatus: status, storedIntent: storedTxn };
+      }
+
+      // Legacy fallback
+      let status = input.isSuccess ? 'SUCCEEDED' : 'FAILED';
+      await tx.paymentTransaction.create({
+        data: {
+          id: `pt-${crypto.randomUUID()}`,
+          workspaceId: input.workspaceId || '',
+          amountCents: input.amountCents,
+          currency: input.currency as any,
+          paymobOrderId: input.paymobOrderId,
+          paymobTxnId: input.paymobTxnId,
+          paymentMethod: input.paymentMethod,
+          status,
+          errorMessage: input.isSuccess ? null : 'Transaction reported success=false',
+          createdAt: now,
+        },
+      });
+
+      return { duplicate: false, transactionStatus: status, storedIntent: null };
     });
   }
 

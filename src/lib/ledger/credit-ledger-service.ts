@@ -823,7 +823,8 @@ export class CreditLedgerService {
       | 'SUBSCRIPTION_GRANT'
       | 'TOP_UP_PURCHASE'
       | 'ADMIN_ADJUSTMENT'
-      | 'JOB_REFUND';
+      | 'JOB_REFUND'
+      | 'REFUND_REVERSAL';
     referenceId?: string;
     idempotencyKey: string;
     description?: string;
@@ -872,7 +873,7 @@ export class CreditLedgerService {
 
       const { settledBalance } = this.computeBalancesSync(db, params.workspaceId);
       const balanceAfter = settledBalance + params.amount;
-      if (balanceAfter < 0) {
+      if (balanceAfter < 0 && params.type !== 'REFUND_REVERSAL') {
         throw new Error(
           `Credit adjustment would result in negative balance (${balanceAfter})`
         );

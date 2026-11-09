@@ -3,9 +3,14 @@ import { PaymobSecurity } from '../../../../lib/paymob/paymob-hmac.ts';
 import { SUBSCRIPTION_PLANS, TOP_UP_PACKS } from '../../../../lib/pricing/plans.ts';
 import { CreditLedgerService } from '../../../../lib/ledger/credit-ledger-service.ts';
 import { getWebhookRepository } from '../../../../lib/db/repositories/webhook-repository.ts';
+import { getPaymobConfig } from '../../../../lib/paymob/paymob-config.ts';
 import type { PlanTier } from '../../../../lib/types/index.ts';
 
-function getConfiguredPaymobSecret(): string | null {
+function getConfiguredPaymobSecret(currency?: string): string | null {
+  const isSar = String(currency || '').toUpperCase() === 'SAR';
+  const regionalSecret = getPaymobConfig(isSar ? 'SA' : 'EG').hmacSecret;
+  if (regionalSecret) return regionalSecret;
+
   const secret = process.env.PAYMOB_HMAC_SECRET?.trim();
   if (
     !secret ||
@@ -22,7 +27,12 @@ function inferCreditsFromTransaction(txnObj: Record<string, unknown>): {
   credits: number;
   planTier?: PlanTier;
 } {
-  if (typeof txnObj.credits === 'number' && txnObj.credits > 0) {
+  const isStrict =
+    process.env.SHOTISTRY_STRICT_PAYMENT_INTENT === '1' ||
+    process.env.SHOTISTRY_DEPLOY_ENV === 'staging' ||
+    process.env.NODE_ENV === 'production';
+
+  if (!isStrict && typeof txnObj.credits === 'number' && txnObj.credits > 0) {
     return {
       credits: txnObj.credits,
       planTier: txnObj.plan_tier as PlanTier | undefined,
@@ -49,13 +59,27 @@ function inferCreditsFromTransaction(txnObj: Record<string, unknown>): {
     }
   }
 
-  return { credits: 50 };
+  return { credits: 0 };
 }
 
 export async function POST(request: Request) {
   try {
-    // 1. Fail-closed check: PAYMOB_HMAC_SECRET must be genuinely configured
-    const secretKey = getConfiguredPaymobSecret();
+    const rawBody = await request.text();
+    let body: Record<string, any>;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return Response.json({ error: 'Invalid JSON payload' }, { status: 400 });
+    }
+
+    const payloadCurrency =
+      body?.subscription_data?.currency ||
+      body?.obj?.currency ||
+      body?.currency ||
+      'EGP';
+
+    // 1. Fail-closed check: HMAC secret must be configured for target currency
+    const secretKey = getConfiguredPaymobSecret(payloadCurrency);
     if (!secretKey) {
       return Response.json(
         {
@@ -64,14 +88,6 @@ export async function POST(request: Request) {
         },
         { status: 503 }
       );
-    }
-
-    const rawBody = await request.text();
-    let body: Record<string, any>;
-    try {
-      body = JSON.parse(rawBody);
-    } catch {
-      return Response.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
 
     const payloadHash = crypto.createHash('sha256').update(rawBody).digest('hex');
@@ -181,7 +197,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Case 2: Standard Transaction Webhook (One-off credit top-ups or initial checkout)
+    // Case 2: Standard Transaction Webhook (One-off credit top-ups or checkout)
     const url = new URL(request.url);
     const receivedHmac =
       request.headers.get('paymob-hmac') ||
@@ -214,6 +230,11 @@ export async function POST(request: Request) {
 
     const paymobTxnId = String(txnObj.id);
     const paymobOrderId = txnObj.order?.id ? String(txnObj.order.id) : null;
+    const specialReference =
+      txnObj.special_reference ||
+      txnObj.merchant_order_id ||
+      txnObj.order?.shipping_data?.extra_description ||
+      null;
     const eventId = String(body.event_id || `txn:${paymobTxnId}`);
 
     let workspaceId = String(
@@ -225,28 +246,12 @@ export async function POST(request: Request) {
       workspaceId = found ?? '';
     }
 
-    if (!workspaceId) {
-      return Response.json(
-        { error: 'Missing workspace_id in verified Paymob transaction webhook' },
-        { status: 400 }
-      );
-    }
-
-    const exists = await webhookRepo.workspaceExists(workspaceId);
-    if (!exists) {
-      return Response.json(
-        { error: `Workspace '${workspaceId}' does not exist` },
-        { status: 404 }
-      );
-    }
-
     const currency = String(txnObj.currency || 'EGP').toUpperCase() === 'SAR' ? 'SAR' : 'EGP';
     const amountCents = Number(txnObj.amount_cents || 0);
+    const isRefunded = txnObj.is_refunded === true;
+    const isVoided = txnObj.is_voided === true;
     const isSuccess =
-      txnObj.success === true &&
-      !txnObj.is_voided &&
-      !txnObj.is_refunded &&
-      !txnObj.error_occured;
+      txnObj.success === true && !isVoided && !isRefunded && !txnObj.error_occured;
 
     const txnState = await webhookRepo.processTransactionEvent({
       eventId,
@@ -254,11 +259,14 @@ export async function POST(request: Request) {
       rawBody,
       paymobTxnId,
       paymobOrderId,
+      specialReference,
       workspaceId,
       currency,
       amountCents,
       paymentMethod: txnObj.source_data?.sub_type || txnObj.source_data?.type || 'card',
       isSuccess,
+      isRefunded,
+      isVoided,
     });
 
     if (txnState.duplicate) {
@@ -271,25 +279,89 @@ export async function POST(request: Request) {
       });
     }
 
-    let creditsGranted = 0;
-    if (isSuccess) {
-      const inferred = inferCreditsFromTransaction(txnObj);
-      const grant = await ledger.grantCredits({
-        workspaceId,
-        amount: inferred.credits,
-        type: inferred.planTier ? 'SUBSCRIPTION_GRANT' : 'TOP_UP_PURCHASE',
-        referenceId: paymobTxnId,
-        idempotencyKey: `paymob:txn:${paymobTxnId}`,
-        description: inferred.planTier
-          ? `Paymob Plan Purchase (${inferred.planTier})`
-          : `Paymob Credit Top-Up (+${inferred.credits} credits)`,
+    // Handle Unmatched Intent
+    if (txnState.transactionStatus === 'UNMATCHED_INTENT') {
+      return Response.json({
+        received: true,
+        type: 'TRANSACTION',
+        error: 'Unmatched intent: no stored checkout transaction matches reference',
+        transactionStatus: 'UNMATCHED_INTENT',
+        creditsGranted: 0,
       });
-      if (!grant.duplicate) {
-        creditsGranted = inferred.credits;
+    }
+
+    // Handle Amount/Currency Mismatch
+    if (txnState.transactionStatus === 'UNMATCHED_AMOUNT') {
+      return Response.json({
+        received: true,
+        type: 'TRANSACTION',
+        error: txnState.errorMessage || 'Unmatched amount or currency with stored intent',
+        transactionStatus: 'UNMATCHED_AMOUNT',
+        creditsGranted: 0,
+      });
+    }
+
+    // Handle Refund / Void Reversal
+    if (isRefunded || isVoided || txnState.transactionStatus === 'REFUNDED' || txnState.transactionStatus === 'VOIDED') {
+      const creditsToReverse =
+        txnState.storedIntent?.credits || inferCreditsFromTransaction(txnObj).credits;
+      const targetWorkspace = txnState.storedIntent?.workspaceId || workspaceId;
+
+      if (creditsToReverse > 0 && targetWorkspace) {
+        await ledger.grantCredits({
+          workspaceId: targetWorkspace,
+          amount: -creditsToReverse,
+          type: 'REFUND_REVERSAL',
+          referenceId: paymobTxnId,
+          idempotencyKey: `paymob:refund:${paymobTxnId}`,
+          description: `Paymob Refund Reversal (-${creditsToReverse} credits)`,
+        });
       }
 
-      if (inferred.planTier) {
-        await webhookRepo.updateSubscriptionPlan(workspaceId, inferred.planTier, inferred.credits);
+      return Response.json({
+        received: true,
+        type: 'TRANSACTION',
+        refunded: true,
+        transactionStatus: txnState.transactionStatus,
+        creditsReversed: creditsToReverse,
+      });
+    }
+
+    let creditsGranted = 0;
+    if (isSuccess) {
+      let credits = 0;
+      let targetPlanTier: PlanTier | undefined;
+      let targetWorkspace = workspaceId;
+
+      if (txnState.storedIntent) {
+        // Zero-trust: derived strictly from stored database intent
+        credits = txnState.storedIntent.credits;
+        targetPlanTier = txnState.storedIntent.planTier ?? undefined;
+        targetWorkspace = txnState.storedIntent.workspaceId;
+      } else {
+        const inferred = inferCreditsFromTransaction(txnObj);
+        credits = inferred.credits;
+        targetPlanTier = inferred.planTier;
+      }
+
+      if (credits > 0 && targetWorkspace) {
+        const grant = await ledger.grantCredits({
+          workspaceId: targetWorkspace,
+          amount: credits,
+          type: targetPlanTier ? 'SUBSCRIPTION_GRANT' : 'TOP_UP_PURCHASE',
+          referenceId: paymobTxnId,
+          idempotencyKey: `paymob:txn:${paymobTxnId}`,
+          description: targetPlanTier
+            ? `Paymob Plan Purchase (${targetPlanTier})`
+            : `Paymob Credit Top-Up (+${credits} credits)`,
+        });
+        if (!grant.duplicate) {
+          creditsGranted = credits;
+        }
+
+        if (targetPlanTier) {
+          await webhookRepo.updateSubscriptionPlan(targetWorkspace, targetPlanTier, credits);
+        }
       }
     }
 

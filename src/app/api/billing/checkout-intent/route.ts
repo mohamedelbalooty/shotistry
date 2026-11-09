@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { SUBSCRIPTION_PLANS, TOP_UP_PACKS } from '../../../../lib/pricing/plans.ts';
 import { PaymobSecurity } from '../../../../lib/paymob/paymob-hmac.ts';
+import { PaymobClient } from '../../../../lib/paymob/paymob-client.ts';
 import { resolveAuthenticatedSession } from '../../../../lib/auth/session.ts';
 import { requireWorkspacePermission } from '../../../../lib/auth/rbac.ts';
 import { validateCsrfRequest } from '../../../../lib/security/csrf.ts';
@@ -9,7 +10,7 @@ import { requireVerifiedEmail } from '../../../../lib/auth/email-verification-gu
 import { getBillingRepository } from '../../../../lib/db/repositories/billing-repository.ts';
 import { isMockFallbackAllowed } from '../../../../lib/config/env.ts';
 import { POST as paymobWebhookPost } from '../../webhooks/paymob/route.ts';
-import type { PlanTier } from '../../../../lib/types/index.ts';
+import type { Country, PlanTier } from '../../../../lib/types/index.ts';
 
 export async function POST(request: Request) {
   try {
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
       body?.currency === 'SAR' || (body?.currency !== 'EGP' && session.country === 'SA')
         ? 'SAR'
         : 'EGP';
+    const country: Country = currency === 'SAR' ? 'SA' : (session.country || 'EG');
     const paymentMethod = String(body?.paymentMethod || 'card');
 
     let amountMajor = 0;
@@ -105,8 +107,34 @@ export async function POST(request: Request) {
 
     const amountCents = PaymobSecurity.toSubunits(amountMajor);
     const transactionId = `pt-${crypto.randomUUID()}`;
-    const paymobOrderId = `ord-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const now = new Date().toISOString();
+
+    const paymobClient = new PaymobClient();
+    const intention = await paymobClient.createPaymentIntention({
+      country,
+      amountCents,
+      currency,
+      paymentMethod,
+      specialReference: transactionId,
+      items: [
+        {
+          name:
+            kind === 'SUBSCRIPTION'
+              ? `Shotistry ${planTier} Subscription`
+              : `Shotistry ${credits} Credits Pack`,
+          amount: amountCents,
+          quantity: 1,
+        },
+      ],
+      billingData: {
+        firstName: session.user.name ? session.user.name.split(' ')[0] : 'Merchant',
+        lastName: session.user.name ? session.user.name.split(' ')[1] || 'User' : 'User',
+        email: session.email,
+        country,
+      },
+      notificationUrl: `${process.env.APP_BASE_URL || 'https://staging.shotistry.com'}/api/webhooks/paymob`,
+      redirectionUrl: `${process.env.APP_BASE_URL || 'https://staging.shotistry.com'}/billing/return?transaction_id=${transactionId}`,
+    });
 
     const billingRepo = getBillingRepository();
     await billingRepo.createPendingPaymentTransaction({
@@ -114,7 +142,14 @@ export async function POST(request: Request) {
       workspaceId: workspace.workspaceId,
       amountCents,
       currency,
-      paymobOrderId,
+      kind,
+      planTier: planTier ?? null,
+      packId: packId ?? null,
+      credits,
+      region: country,
+      paymobOrderId: intention.orderId,
+      intentionId: intention.intentionId,
+      specialReference: transactionId,
       paymentMethod,
       createdAt: now,
     });
@@ -146,7 +181,7 @@ export async function POST(request: Request) {
           is_refunded: false,
           is_standalone_payment: true,
           is_voided: false,
-          order: { id: paymobOrderId },
+          order: { id: intention.orderId },
           owner: 112233,
           pending: false,
           source_data: {
@@ -155,6 +190,7 @@ export async function POST(request: Request) {
             type: 'card',
           },
           success: true,
+          special_reference: transactionId,
           workspace_id: workspace.workspaceId,
           credits,
           plan_tier: planTier,
@@ -184,7 +220,8 @@ export async function POST(request: Request) {
       success: true,
       intent: {
         transactionId,
-        paymobOrderId,
+        paymobOrderId: intention.orderId,
+        intentionId: intention.intentionId,
         workspaceId: workspace.workspaceId,
         kind,
         planTier: planTier ?? null,
@@ -193,6 +230,8 @@ export async function POST(request: Request) {
         currency,
         credits,
         status: sandboxWebhookResult?.creditsGranted ? 'SUCCEEDED_SANDBOX' : 'PENDING',
+        clientSecret: intention.clientSecret,
+        unifiedCheckoutUrl: intention.unifiedCheckoutUrl,
         sandboxWebhookResult,
       },
     });
