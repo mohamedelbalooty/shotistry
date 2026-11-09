@@ -386,4 +386,114 @@ describe('GeminiClient Engine & Official Interactions API Contract Tests', () =>
     assert.equal(independentCheck.fidelityScore, 1);
     assert.equal(independentCheck.exactPixelMatchRatio, 1);
   });
+
+  test('M4 HARDENING: timeout triggers retryable GeminiTimeoutError', async () => {
+    const mockHangingClient = {
+      interactions: {
+        create: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          return { status: 'completed' };
+        },
+      },
+    };
+
+    const client = new GeminiClient('AIzaSyContractTestKey999999', mockHangingClient);
+    await assert.rejects(
+      async () => {
+        await client.generateProductPhoto('job-timeout-test', {
+          prompt: 'Timeout prompt',
+          negativePrompt: 'blurry',
+          aspectRatio: '1:1',
+          referenceImageBase64: sampleProductImage,
+          timeoutMs: 50,
+          maxRetries: 0,
+        });
+      },
+      (err) => {
+        assert.ok(err.name === 'GeminiTimeoutError' || err.message.includes('timed out'));
+        assert.equal(err.isRetryable, true);
+        return true;
+      }
+    );
+  });
+
+  test('M4 HARDENING: 429 rate limit is retried with backoff and succeeds on 2nd attempt', async () => {
+    let callCount = 0;
+    const mockRateLimitClient = {
+      interactions: {
+        create: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              status: 'failed',
+              errors: [{ code: 429, message: 'Resource exhausted: rate limit exceeded' }],
+            };
+          }
+          const outputData = sampleProductImage.replace(/^data:image\/png;base64,/, '');
+          return {
+            id: 'inter_retry_success_007',
+            status: 'completed',
+            output_image: {
+              type: 'image',
+              mime_type: 'image/png',
+              data: outputData,
+            },
+            usage: {
+              total_input_tokens: 500,
+              total_output_tokens: 1120,
+            },
+          };
+        },
+      },
+    };
+
+    const client = new GeminiClient('AIzaSyContractTestKey999999', mockRateLimitClient);
+    const result = await client.generateProductPhoto('job-retry-429', {
+      prompt: 'Rate limit test',
+      negativePrompt: 'blurry',
+      aspectRatio: '1:1',
+      referenceImageBase64: sampleProductImage,
+      maxRetries: 2,
+    });
+
+    assert.equal(callCount, 2, 'Must have retried after 429 and succeeded on attempt 2');
+    assert.equal(result.status, 'COMPLETED');
+    assert.ok(result.costUsdMicros > 0);
+    assert.equal(result.aiGenerated, true);
+  });
+
+  test('M4 HARDENING: safety block throws non-retryable GeminiSafetyBlockError without leaking raw prompt', async () => {
+    let attempts = 0;
+    const mockSafetyClient = {
+      interactions: {
+        create: async () => {
+          attempts++;
+          return {
+            status: 'failed',
+            errors: [{ code: 'SAFETY', message: 'Prompt triggered safety filter: restricted category' }],
+          };
+        },
+      },
+    };
+
+    const client = new GeminiClient('AIzaSyContractTestKey999999', mockSafetyClient);
+    await assert.rejects(
+      async () => {
+        await client.generateProductPhoto('job-safety-test', {
+          prompt: 'CONFIDENTIAL_SECRET_PRODUCT_PROMPT',
+          negativePrompt: 'blurry',
+          aspectRatio: '1:1',
+          referenceImageBase64: sampleProductImage,
+          maxRetries: 2,
+        });
+      },
+      (err) => {
+        assert.equal(attempts, 1, 'Non-retryable safety error must not be retried');
+        assert.equal(err.isRetryable, false);
+        assert.ok(!err.message.includes('CONFIDENTIAL_SECRET_PRODUCT_PROMPT'));
+        assert.ok(err.message.includes('safety policy'));
+        return true;
+      }
+    );
+  });
 });

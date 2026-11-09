@@ -527,3 +527,26 @@ export function getAllPlansProfitabilityMatrix(
   }
   return reports;
 }
+
+/**
+ * Calculates actual generation cost in micro-dollars ($1 USD = 1,000,000 micros)
+ * based on actual returned token usage and model resolution catalog rates.
+ */
+export function calculateActualGenerationCostUsdMicros(
+  modelId: GeminiImageModelId,
+  usage?: { inputTokens?: number; outputTokens?: number; thoughtTokens?: number },
+  imageSize: GeminiImageSize = '1K',
+  serviceTier: GeminiServiceTier = 'standard'
+): number {
+  const spec = MODEL_PRICING_CATALOG[modelId] ?? MODEL_PRICING_CATALOG['gemini-3.1-flash-image'];
+  const tierPricing = spec.tiers[serviceTier] ?? spec.tiers.standard;
+
+  const inTokens = usage?.inputTokens ?? spec.inputTokensPerImage * 2;
+  const outTokens = usage?.outputTokens ?? spec.outputTokensByResolution[imageSize] ?? 1120;
+
+  const inputCost = (inTokens / 1_000_000) * tierPricing.inputUsdPer1MTokens;
+  const outputCost = (outTokens / 1_000_000) * tierPricing.imageOutputUsdPer1MTokens;
+  const totalCostUsd = inputCost + outputCost + STORAGE_AND_DELIVERY_COST_USD;
+
+  return Math.round(totalCostUsd * 1_000_000);
+}

@@ -135,6 +135,8 @@ export interface GenerationResult {
   synthesizedPrompt: string;
   negativePrompt?: string;
   synthIdDetected: boolean;
+  aiGenerated?: boolean;
+  costUsdMicros?: number;
   fidelityScore: number;
   fidelityVerified: boolean;
   usageMetadata?: GeminiUsageMetadata;
