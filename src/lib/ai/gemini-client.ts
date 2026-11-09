@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { GoogleGenAI } from '@google/genai';
 import type {
   AspectRatio,
@@ -21,6 +22,12 @@ import {
   getResolutionForAspectRatio,
 } from './image-processor.ts';
 import { isMockFallbackAllowed } from '../config/env.ts';
+import {
+  classifyGeminiError,
+  GeminiNoImageOutputError,
+  GeminiTimeoutError,
+} from './gemini-errors.ts';
+import { calculateActualGenerationCostUsdMicros } from '../pricing/model-costs.ts';
 
 export interface GenerateImageOptions {
   prompt: string;
@@ -33,6 +40,8 @@ export interface GenerateImageOptions {
   referenceImageBase64?: string;
   maskImageBase64?: string;
   lockProductForeground?: boolean;
+  timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export interface InteractionsCreateRequest {
@@ -181,24 +190,30 @@ export class GeminiClient {
         options.maskImageBase64 ?? isolated.maskDataUrl
       );
 
+      const sendMask = process.env.GEMINI_SEND_MASK !== 'false';
+      const inputs: InteractionsCreateRequest['input'] = [
+        {
+          type: 'text',
+          text: `${options.prompt}\nAvoid: ${options.negativePrompt}\nPreserve the exact product foreground from the provided reference image${sendMask ? ' and binary mask' : ''}.`,
+        },
+        {
+          type: 'image',
+          mime_type: parsedRef.mimeType,
+          data: parsedRef.buffer.toString('base64'),
+        },
+      ];
+
+      if (sendMask) {
+        inputs.push({
+          type: 'image',
+          mime_type: parsedMask.mimeType,
+          data: parsedMask.buffer.toString('base64'),
+        });
+      }
+
       const requestPayload: InteractionsCreateRequest = {
         model: targetModel,
-        input: [
-          {
-            type: 'text',
-            text: `${options.prompt}\nAvoid: ${options.negativePrompt}\nPreserve the exact product foreground from the provided reference image and binary mask.`,
-          },
-          {
-            type: 'image',
-            mime_type: parsedRef.mimeType,
-            data: parsedRef.buffer.toString('base64'),
-          },
-          {
-            type: 'image',
-            mime_type: parsedMask.mimeType,
-            data: parsedMask.buffer.toString('base64'),
-          },
-        ],
+        input: inputs,
         response_format: {
           type: 'image',
           mime_type: outputMimeType,
@@ -207,18 +222,59 @@ export class GeminiClient {
         },
       };
 
-      const interaction = await this.client.interactions.create(requestPayload);
+      const maxRetries = options.maxRetries ?? 2;
+      const timeoutMs = options.timeoutMs ?? (effectiveImageSize === '4K' ? 35000 : 25000);
 
-      if (
-        interaction.status === 'failed' ||
-        interaction.status === 'cancelled' ||
-        (interaction.errors && interaction.errors.length > 0)
-      ) {
-        const errMessage =
-          interaction.errors
-            ?.map((e) => `${e.code ?? 'API_ERROR'}: ${e.message ?? 'Unknown error'}`)
-            .join('; ') || `Gemini Interaction ${interaction.id ?? ''} ended with status=${interaction.status}`;
-        throw new Error(`Gemini Interactions API failure: ${errMessage}`);
+      let interaction: InteractionResponseLike | null = null;
+      let lastClassifiedError: unknown = null;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          let timer: NodeJS.Timeout | undefined;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new GeminiTimeoutError(timeoutMs));
+            }, timeoutMs);
+          });
+
+          try {
+            interaction = await Promise.race([
+              this.client.interactions.create(requestPayload),
+              timeoutPromise,
+            ]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+
+          if (
+            interaction.status === 'failed' ||
+            interaction.status === 'cancelled' ||
+            (interaction.errors && interaction.errors.length > 0)
+          ) {
+            const errMessage =
+              interaction.errors
+                ?.map((e) => `${e.code ?? 'API_ERROR'}: ${e.message ?? 'Unknown error'}`)
+                .join('; ') ||
+              `Gemini Interaction ${interaction.id ?? ''} ended with status=${interaction.status}`;
+            throw new Error(`Gemini Interactions API failure: ${errMessage}`);
+          }
+
+          break; // Succeeded
+        } catch (err: unknown) {
+          const classified = classifyGeminiError(err);
+          lastClassifiedError = classified;
+
+          if (!classified.isRetryable || attempt >= maxRetries) {
+            throw classified;
+          }
+
+          const backoffMs = Math.min(2000, 100 * Math.pow(2, attempt) + Math.random() * 50);
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+      }
+
+      if (!interaction) {
+        throw classifyGeminiError(lastClassifiedError);
       }
 
       // Extract image output from documented `interaction.output_image.data` first,
@@ -240,9 +296,16 @@ export class GeminiClient {
       }
 
       if (!extractedBase64 || extractedBase64.trim().length === 0) {
-        throw new Error(
+        throw new GeminiNoImageOutputError(
           'Gemini Interactions API returned no image output in interaction.output_image.data or model_output steps'
         );
+      }
+
+      // Verify that the extracted base64 represents a valid decodable image via Sharp
+      const outputBuffer = Buffer.from(extractedBase64, 'base64');
+      const sharpMeta = await sharp(outputBuffer).metadata();
+      if (!sharpMeta.width || !sharpMeta.height) {
+        throw new GeminiNoImageOutputError('Gemini output image could not be decoded by Sharp');
       }
 
       const finalMimeType = extractedMimeType || outputMimeType;
@@ -284,6 +347,12 @@ export class GeminiClient {
           }
         : undefined;
 
+      const costUsdMicros = calculateActualGenerationCostUsdMicros(
+        targetModel,
+        usageMetadata,
+        effectiveImageSize
+      );
+
       return {
         jobId,
         interactionId: interaction.id,
@@ -299,8 +368,10 @@ export class GeminiClient {
         modelUsed: targetModel,
         executionMode: 'LIVE_GEMINI_API' as ExecutionMode,
         usageMetadata,
+        costUsdMicros,
         creditsCharged: 1,
         synthIdDetected: true,
+        aiGenerated: true,
         fidelityScore: deliveredFidelity.fidelityScore,
         fidelityVerified: deliveredFidelity.fidelityVerified,
         completedAt,
@@ -328,8 +399,6 @@ export class GeminiClient {
     );
 
     // Local Composite Sandbox Mode (when GEMINI_API_KEY is not configured):
-    // Returns the real pixel-composited studio image containing the customer's actual product,
-    // and truthfully reports synthIdDetected: false and executionMode: 'LOCAL_COMPOSITE_SANDBOX'.
     return {
       jobId,
       status: 'COMPLETED',
@@ -342,11 +411,10 @@ export class GeminiClient {
       aspectRatio: options.aspectRatio,
       resolution,
       modelUsed: targetModel,
-      executionMode: 'LIVE_GEMINI_API' === ('LOCAL_COMPOSITE_SANDBOX' as string)
-        ? 'LIVE_GEMINI_API'
-        : ('LOCAL_COMPOSITE_SANDBOX' as ExecutionMode),
+      executionMode: 'LOCAL_COMPOSITE_SANDBOX' as ExecutionMode,
       creditsCharged: 1,
       synthIdDetected: false,
+      aiGenerated: false,
       fidelityScore: deliveredFidelity.fidelityScore,
       fidelityVerified: deliveredFidelity.fidelityVerified,
       completedAt,

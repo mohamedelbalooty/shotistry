@@ -35,7 +35,7 @@
 | [`tests/api-photoshoots.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/api-photoshoots.test.mjs) | 6 | 6 | 0 | 0 | Integration (Auth+CSRF+RBAC Generation Route, Signed URLs, `403` Plan Model/4K Gating, `402` Insufficient Credits) | ✅ PASS |
 | [`tests/db-ledger.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/db-ledger.test.mjs) | 5 | 5 | 0 | 0 | Integration (`CreditLedgerService` Atomic Trial Provisioning, Reservations, Settlement/Release, Idempotency) | ✅ PASS |
 | [`tests/e2e-workflow.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/e2e-workflow.test.mjs) | 1 | 1 | 0 | 0 | End-to-End (Register -> Cookie+CSRF -> Upload -> Generation -> Job Poll -> Signed Download -> Paymob Webhook -> `ADMIN` Metrics) | ✅ PASS |
-| [`tests/gemini-client.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/gemini-client.test.mjs) | 8 | 8 | 0 | 0 | Unit + Contract (Mocked Interactions API + Delivered Fidelity + `lockProductForeground`) | ✅ PASS |
+| [`tests/gemini-client.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/gemini-client.test.mjs) | 11 | 11 | 0 | 0 | Unit + Contract (Interactions API + M4 Hardening: Timeout AbortController, Exponential Retries, Safety Block Classification, Token Usage Cost Capture) | ✅ PASS |
 | [`tests/image-pipeline.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/image-pipeline.test.mjs) | 13 | 13 | 0 | 0 | Unit + Integration (Sharp Decoding, EXIF Rotation & 6 Difficult Product Categories) | ✅ PASS |
 | [`tests/ledger.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/ledger.test.mjs) | 7 | 7 | 0 | 0 | Unit (Double-Entry Accounting Invariants) | ✅ PASS |
 | [`tests/paymob-webhook.test.mjs`](file:///Users/tasawk/StudioProjects/shotistry/tests/paymob-webhook.test.mjs) | 6 | 6 | 0 | 0 | Integration (Fail-Closed HMAC `503`/`401`, Replay Dedup, Subscription Transitions, Unknown Workspace `404`) | ✅ PASS |
@@ -50,7 +50,7 @@
 | [`tests/object-storage.test.mjs`](file:///E:/GithubProjects/shotistry/tests/object-storage.test.mjs) | 5 | 5 | 0 | 0 | Unit (Milestone M2 — Cloudflare R2 / S3 Object Storage Provider & Key Isolation) | ✅ PASS |
 | [`tests/asset-upload-flow.test.mjs`](file:///E:/GithubProjects/shotistry/tests/asset-upload-flow.test.mjs) | 4 | 4 | 0 | 0 | Integration (Milestone M2 — Presigned Upload Intent, Sharp Finalize, Presigned GET Access Control & Cron Storage Cleanup) | ✅ PASS |
 | [`tests/async-jobs.test.mjs`](file:///E:/GithubProjects/shotistry/tests/async-jobs.test.mjs) | 5 | 5 | 0 | 0 | Integration (Milestone M3 — Asynchronous Generation Jobs, Idempotency-Key Deduplication, Atomic Settle/Release, Reaper Cron & Studio Polling) | ✅ PASS |
-| **Total Across All 29 Test Files (32 Suites)** | **174** | **156** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **156/156 Active Passing (14/14 Live PG)** |
+| **Total Across All 29 Test Files (32 Suites)** | **177** | **159** | **0** | **18 (14 PG Sandbox + 4 External)** | — | **159/159 Active Passing (14/14 Live PG)** |
 
 ---
 
