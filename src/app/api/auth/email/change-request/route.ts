@@ -10,6 +10,9 @@ import {
   renderEmailChangeConfirmTemplate,
   renderEmailChangeNoticeTemplate,
 } from '../../../../../lib/email/index.ts';
+import { createScopedLogger } from '../../../../../lib/observability/logger.ts';
+
+const logger = createScopedLogger('auth:email:change-request');
 
 const changeRequestSchema = z.object({
   newEmail: z.string().trim().email().max(254),
@@ -139,7 +142,7 @@ export async function POST(request: Request) {
         idempotencyKey: `email:change:notice:${user.id}:${rawToken.slice(0, 16)}`,
       });
     } catch (emailErr) {
-      console.error('Failed to dispatch email change messages:', emailErr);
+      logger.error('Failed to dispatch email change messages', emailErr);
     }
 
     return Response.json(

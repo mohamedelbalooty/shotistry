@@ -91,5 +91,15 @@ describe('Phase 1: Dual-Driver Repository Parity & Static Architecture Guard', (
     const adminRepo = getAdminRepository();
     const metrics = await adminRepo.getPlatformMetrics();
     assert.equal(metrics.systemStatus.database, 'SQLITE');
+    assert.ok(metrics.jobStatusBreakdown, 'jobStatusBreakdown must be returned');
+    assert.equal(typeof metrics.jobStatusBreakdown.queued, 'number');
+    assert.equal(typeof metrics.jobStatusBreakdown.processing, 'number');
+    assert.equal(typeof metrics.jobStatusBreakdown.completed, 'number');
+    assert.equal(typeof metrics.jobStatusBreakdown.failed, 'number');
+    assert.equal(typeof metrics.jobStatusBreakdown.stuck, 'number');
+    assert.ok(metrics.paymentEventsSummary, 'paymentEventsSummary must be returned');
+    assert.equal(typeof metrics.paymentEventsSummary.total, 'number');
+    assert.equal(typeof metrics.paymentEventsSummary.paid, 'number');
+    assert.equal(typeof metrics.paymentEventsSummary.unmatched, 'number');
   });
 });

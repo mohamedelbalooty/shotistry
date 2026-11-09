@@ -12,7 +12,10 @@ import { validateCsrfRequest } from '../../../../../lib/security/csrf.ts';
 import { requireVerifiedEmail } from '../../../../../lib/auth/email-verification-guard.ts';
 import { getEmailTransport } from '../../../../../lib/email/index.ts';
 import { renderWorkspaceInviteTemplate } from '../../../../../lib/email/templates.ts';
+import { createScopedLogger } from '../../../../../lib/observability/logger.ts';
 import type { WorkspaceRole } from '../../../../../lib/types/index.ts';
+
+const logger = createScopedLogger('workspaces:members');
 
 const memberMutationSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -259,7 +262,7 @@ export async function POST(
         idempotencyKey: `ws-invite:${invite.id}:${rawToken.slice(0, 16)}`,
       });
     } catch (emailErr) {
-      console.error('Failed to dispatch workspace invite email:', emailErr);
+      logger.error('Failed to dispatch workspace invite email', emailErr);
     }
 
     return Response.json(

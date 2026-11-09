@@ -36,6 +36,22 @@ export interface AdminJobRow {
   createdAt: string;
 }
 
+export interface JobStatusBreakdown {
+  queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  stuck: number;
+}
+
+export interface PaymentEventsSummary {
+  total: number;
+  paid: number;
+  failed: number;
+  unmatched: number;
+  refunded: number;
+}
+
 export interface PlatformMetricsSummary {
   totalUsers: number;
   payingSubscribers: number;
@@ -46,6 +62,8 @@ export interface PlatformMetricsSummary {
   aiExpensesUsd: number;
   generationSuccessRate: number;
   totalImagesGenerated: number;
+  jobStatusBreakdown: JobStatusBreakdown;
+  paymentEventsSummary: PaymentEventsSummary;
   recentJobs: AdminJobRow[];
   recentAuditLogs: Array<Record<string, unknown>>;
   systemStatus: {
@@ -228,6 +246,46 @@ export class SqliteAdminRepository implements AdminRepository {
       !paymobSecret.includes('placeholder') &&
       !paymobSecret.includes('your_paymob');
 
+    const jobBreakdownRow = db
+      .prepare(
+        `SELECT
+           SUM(CASE WHEN "status" = 'QUEUED' THEN 1 ELSE 0 END) AS queued,
+           SUM(CASE WHEN "status" = 'PROCESSING' THEN 1 ELSE 0 END) AS processing,
+           SUM(CASE WHEN "status" = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
+           SUM(CASE WHEN "status" = 'FAILED' THEN 1 ELSE 0 END) AS failed,
+           SUM(CASE WHEN "status" IN ('QUEUED', 'PROCESSING') AND datetime("createdAt") < datetime('now', '-5 minutes') THEN 1 ELSE 0 END) AS stuck
+         FROM "GenerationJob"`
+      )
+      .get() as Record<string, number | null>;
+
+    const jobStatusBreakdown: JobStatusBreakdown = {
+      queued: Number(jobBreakdownRow?.queued ?? 0),
+      processing: Number(jobBreakdownRow?.processing ?? 0),
+      completed: Number(jobBreakdownRow?.completed ?? 0),
+      failed: Number(jobBreakdownRow?.failed ?? 0),
+      stuck: Number(jobBreakdownRow?.stuck ?? 0),
+    };
+
+    const paymentSummaryRow = db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN "status" = 'PAID' THEN 1 ELSE 0 END) AS paid,
+           SUM(CASE WHEN "status" = 'FAILED' THEN 1 ELSE 0 END) AS failed,
+           SUM(CASE WHEN "status" IN ('UNMATCHED_INTENT', 'UNMATCHED_AMOUNT') THEN 1 ELSE 0 END) AS unmatched,
+           SUM(CASE WHEN "status" = 'REFUNDED' THEN 1 ELSE 0 END) AS refunded
+         FROM "PaymentTransaction"`
+      )
+      .get() as Record<string, number | null>;
+
+    const paymentEventsSummary: PaymentEventsSummary = {
+      total: Number(paymentSummaryRow?.total ?? 0),
+      paid: Number(paymentSummaryRow?.paid ?? 0),
+      failed: Number(paymentSummaryRow?.failed ?? 0),
+      unmatched: Number(paymentSummaryRow?.unmatched ?? 0),
+      refunded: Number(paymentSummaryRow?.refunded ?? 0),
+    };
+
     return {
       totalUsers,
       payingSubscribers,
@@ -238,6 +296,8 @@ export class SqliteAdminRepository implements AdminRepository {
       aiExpensesUsd,
       generationSuccessRate,
       totalImagesGenerated,
+      jobStatusBreakdown,
+      paymentEventsSummary,
       recentJobs,
       recentAuditLogs,
       systemStatus: {
@@ -460,6 +520,54 @@ export class PostgresAdminRepository implements AdminRepository {
       !paymobSecret.includes('placeholder') &&
       !paymobSecret.includes('your_paymob');
 
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const [
+      queuedJobs,
+      processingJobs,
+      completedJobsCount,
+      failedJobs,
+      stuckJobs,
+      totalPayments,
+      paidPayments,
+      failedPayments,
+      unmatchedIntentPayments,
+      unmatchedAmountPayments,
+      refundedPayments,
+    ] = await Promise.all([
+      this.client.generationJob.count({ where: { status: 'QUEUED' } }),
+      this.client.generationJob.count({ where: { status: 'PROCESSING' } }),
+      this.client.generationJob.count({ where: { status: 'COMPLETED' } }),
+      this.client.generationJob.count({ where: { status: 'FAILED' } }),
+      this.client.generationJob.count({
+        where: {
+          status: { in: ['QUEUED', 'PROCESSING'] },
+          createdAt: { lt: fiveMinutesAgo },
+        },
+      }),
+      this.client.paymentTransaction.count(),
+      this.client.paymentTransaction.count({ where: { status: 'PAID' } }),
+      this.client.paymentTransaction.count({ where: { status: 'FAILED' } }),
+      this.client.paymentTransaction.count({ where: { status: 'UNMATCHED_INTENT' } }),
+      this.client.paymentTransaction.count({ where: { status: 'UNMATCHED_AMOUNT' } }),
+      this.client.paymentTransaction.count({ where: { status: 'REFUNDED' } }),
+    ]);
+
+    const jobStatusBreakdown: JobStatusBreakdown = {
+      queued: queuedJobs,
+      processing: processingJobs,
+      completed: completedJobsCount,
+      failed: failedJobs,
+      stuck: stuckJobs,
+    };
+
+    const paymentEventsSummary: PaymentEventsSummary = {
+      total: totalPayments,
+      paid: paidPayments,
+      failed: failedPayments,
+      unmatched: unmatchedIntentPayments + unmatchedAmountPayments,
+      refunded: refundedPayments,
+    };
+
     return {
       totalUsers,
       payingSubscribers,
@@ -470,6 +578,8 @@ export class PostgresAdminRepository implements AdminRepository {
       aiExpensesUsd,
       generationSuccessRate,
       totalImagesGenerated,
+      jobStatusBreakdown,
+      paymentEventsSummary,
       recentJobs,
       recentAuditLogs: recentAuditLogs.map((log) => ({
         id: log.id,
