@@ -16,6 +16,12 @@ import {
   getClientIp,
   enforceRateLimitPolicies,
 } from '../../../../lib/security/rate-limit.ts';
+import {
+  isBetaInviteRequired,
+  validateBetaInviteCode,
+  redeemBetaInvite,
+  type ValidatedBetaInvite,
+} from '../../../../lib/auth/beta-invites.ts';
 
 const registerSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -25,6 +31,7 @@ const registerSchema = z.object({
   country: z.enum(['EG', 'SA']).optional().default('EG'),
   locale: z.enum(['ar', 'en']).optional().default('ar'),
   workspaceName: z.string().trim().min(2).max(120).optional(),
+  inviteCode: z.string().trim().optional(),
 });
 
 export async function POST(request: Request) {
@@ -92,6 +99,26 @@ export async function POST(request: Request) {
       );
     }
 
+    // Closed Beta Invite Gate check
+    let validatedInvite: ValidatedBetaInvite | null = null;
+    if (isBetaInviteRequired()) {
+      validatedInvite = await validateBetaInviteCode(parsed.data.inviteCode);
+      if (!validatedInvite.isValid) {
+        const errorReason =
+          validatedInvite.reason === 'NOT_FOUND'
+            ? 'BETA_INVITE_REQUIRED: Registration is currently invite-only. A valid beta invite code is required.'
+            : validatedInvite.reason === 'EXPIRED'
+              ? 'BETA_INVITE_EXPIRED: The beta invite code has expired.'
+              : validatedInvite.reason === 'EXHAUSTED'
+                ? 'BETA_INVITE_EXHAUSTED: The beta invite code has reached its maximum redemptions.'
+                : 'BETA_INVITE_INVALID: The beta invite code is inactive or invalid.';
+        return Response.json(
+          { success: false, code: 'BETA_INVITE_REQUIRED', error: errorReason },
+          { status: 403 }
+        );
+      }
+    }
+
     const passwordHash = await hashPassword(parsed.data.password);
     const ledger = new CreditLedgerService();
 
@@ -104,6 +131,10 @@ export async function POST(request: Request) {
       locale: parsed.data.locale,
       workspaceName: parsed.data.workspaceName,
     });
+
+    if (validatedInvite && validatedInvite.id) {
+      await redeemBetaInvite(validatedInvite.id, user.id);
+    }
 
     const priorRawToken = extractSessionToken(request);
     const createdSession = await createSession({

@@ -341,6 +341,47 @@ CREATE TABLE IF NOT EXISTS "WorkspaceInvite" (
 
 CREATE INDEX IF NOT EXISTS "WorkspaceInvite_workspaceId_invitedEmail_idx" ON "WorkspaceInvite"("workspaceId", "invitedEmail");
 CREATE INDEX IF NOT EXISTS "WorkspaceInvite_expiresAt_idx" ON "WorkspaceInvite"("expiresAt");
+
+CREATE TABLE IF NOT EXISTS "BetaInviteCode" (
+  "id" TEXT PRIMARY KEY,
+  "code" TEXT NOT NULL UNIQUE,
+  "description" TEXT,
+  "maxUses" INTEGER NOT NULL DEFAULT 1,
+  "usedCount" INTEGER NOT NULL DEFAULT 0,
+  "expiresAt" TEXT,
+  "isActive" INTEGER NOT NULL DEFAULT 1,
+  "createdAt" TEXT NOT NULL,
+  "updatedAt" TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "BetaInviteRedemption" (
+  "id" TEXT PRIMARY KEY,
+  "inviteCodeId" TEXT NOT NULL,
+  "userId" TEXT NOT NULL,
+  "redeemedAt" TEXT NOT NULL,
+  UNIQUE("inviteCodeId", "userId"),
+  FOREIGN KEY ("inviteCodeId") REFERENCES "BetaInviteCode"("id") ON DELETE CASCADE,
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "BetaInviteRedemption_userId_idx" ON "BetaInviteRedemption"("userId");
+
+CREATE TABLE IF NOT EXISTS "ImageFeedback" (
+  "id" TEXT PRIMARY KEY,
+  "generatedImageId" TEXT NOT NULL,
+  "workspaceId" TEXT NOT NULL,
+  "userId" TEXT NOT NULL,
+  "rating" TEXT NOT NULL,
+  "reason" TEXT,
+  "comment" TEXT,
+  "createdAt" TEXT NOT NULL,
+  FOREIGN KEY ("generatedImageId") REFERENCES "GeneratedImage"("id") ON DELETE CASCADE,
+  FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE,
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "ImageFeedback_generatedImageId_idx" ON "ImageFeedback"("generatedImageId");
+CREATE INDEX IF NOT EXISTS "ImageFeedback_workspaceId_idx" ON "ImageFeedback"("workspaceId");
 `;
 
 function ensureSqliteColumnMigrations(db: DatabaseSync): void {

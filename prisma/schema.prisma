@@ -91,8 +91,10 @@ model User {
   sessions        Session[]
   auditLogs       AdminAuditLog[]
   actionTokens    AuthActionToken[]
-  sentInvites     WorkspaceInvite[] @relation("InviteSender")
-  acceptedInvites WorkspaceInvite[] @relation("InviteAccepter")
+  sentInvites       WorkspaceInvite[]       @relation("InviteSender")
+  acceptedInvites   WorkspaceInvite[]       @relation("InviteAccepter")
+  inviteRedemptions BetaInviteRedemption[]
+  imageFeedbacks    ImageFeedback[]
 }
 
 model Workspace {
@@ -114,6 +116,7 @@ model Workspace {
   reservations  CreditReservation[]
   transactions  PaymentTransaction[]
   invites       WorkspaceInvite[]
+  imageFeedbacks ImageFeedback[]
 }
 
 model WorkspaceMember {
@@ -281,7 +284,8 @@ model GeneratedImage {
   executionMode   String        @default("LIVE_GEMINI_API")
   createdAt       DateTime      @default(now())
 
-  generationJob   GenerationJob @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
+  generationJob   GenerationJob   @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
+  feedbacks       ImageFeedback[]
 }
 
 model Subscription {
@@ -430,4 +434,49 @@ model WorkspaceInvite {
 
   @@index([workspaceId, invitedEmail])
   @@index([expiresAt])
+}
+
+model BetaInviteCode {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  description String?
+  maxUses     Int       @default(1)
+  usedCount   Int       @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  redemptions BetaInviteRedemption[]
+}
+
+model BetaInviteRedemption {
+  id           String         @id @default(uuid())
+  inviteCodeId String
+  userId       String
+  redeemedAt   DateTime       @default(now())
+
+  inviteCode   BetaInviteCode @relation(fields: [inviteCodeId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([inviteCodeId, userId])
+  @@index([userId])
+}
+
+model ImageFeedback {
+  id               String         @id @default(uuid())
+  generatedImageId String
+  workspaceId      String
+  userId           String
+  rating           String         // THUMBS_UP or THUMBS_DOWN
+  reason           String?        // POOR_LIGHTING, BLURRY_FOREGROUND, HALLUCINATED_TEXT, STYLE_MISMATCH, OTHER
+  comment          String?
+  createdAt        DateTime       @default(now())
+
+  generatedImage   GeneratedImage @relation(fields: [generatedImageId], references: [id], onDelete: Cascade)
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([generatedImageId])
+  @@index([workspaceId])
 }
