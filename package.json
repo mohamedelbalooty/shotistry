@@ -16,6 +16,7 @@
     "test:pg": "node --experimental-strip-types scripts/run-pg-tests.mjs",
     "verify": "npx prisma validate && npm run typecheck && npm run lint && npm test && npm run build",
     "verify:all": "npm run verify && npm run test:pg",
+    "smoke:pg": "node scripts/smoke-pg-staging.mjs",
     "test:e2e": "playwright test",
     "seed": "node --experimental-strip-types scripts/seed-test-accounts.mjs"
   },

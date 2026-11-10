@@ -4,9 +4,9 @@ import crypto from 'node:crypto';
 
 /**
  * Extracts and validates the database name from a PostgreSQL connection string.
- * Refuses execution if the database name does not end with '_test'.
  */
 export function extractDatabaseName(url) {
+  if (!url || typeof url !== 'string') return '';
   try {
     const parsed = new URL(url);
     const pathname = parsed.pathname || '';
@@ -17,7 +17,7 @@ export function extractDatabaseName(url) {
   }
 }
 
-const PROTECTED_DATABASE_NAMES = new Set([
+export const PROTECTED_DATABASE_NAMES = new Set([
   'postgres',
   'template0',
   'template1',
@@ -25,6 +25,9 @@ const PROTECTED_DATABASE_NAMES = new Set([
   'production',
   'prod',
   'shotistry',
+  'shotistry_staging',
+  'shotistry_stage',
+  'staging',
   'shotistry_prod',
   'shotistry_production',
   'main',
@@ -68,8 +71,68 @@ export function assertTestDatabase(dbName) {
 }
 
 /**
+ * Validates that POSTGRES_TEST_URL is provided, valid, and strictly isolated
+ * from the application staging connection strings (DATABASE_URL and DIRECT_URL).
+ *
+ * @param {{ testUrl?: string, appUrl?: string, directUrl?: string }} config
+ * @returns {string} Validated test database name
+ */
+export function validatePostgresTestConnection({ testUrl, appUrl, directUrl } = {}) {
+  if (!testUrl || typeof testUrl !== 'string' || testUrl.trim() === '') {
+    throw new Error('SAFETY_ABORT: POSTGRES_TEST_URL is required for PostgreSQL integration tests.');
+  }
+
+  // Normalize URLs for comparison (strip trailing slashes and query strings)
+  const normalize = (u) => {
+    if (!u) return '';
+    try {
+      const parsed = new URL(u);
+      return `${parsed.protocol}//${parsed.username}@${parsed.host}${parsed.pathname}`.toLowerCase();
+    } catch {
+      return u.split('?')[0].toLowerCase();
+    }
+  };
+
+  const normTest = normalize(testUrl);
+  const normApp = normalize(appUrl);
+  const normDirect = normalize(directUrl);
+
+  if (normApp && normTest === normApp) {
+    throw new Error(
+      'SAFETY_ABORT: POSTGRES_TEST_URL cannot point to the application staging database (DATABASE_URL).'
+    );
+  }
+
+  if (normDirect && normTest === normDirect) {
+    throw new Error(
+      'SAFETY_ABORT: POSTGRES_TEST_URL cannot point to the direct staging database (DIRECT_URL).'
+    );
+  }
+
+  const testDb = extractDatabaseName(testUrl);
+  const appDb = extractDatabaseName(appUrl);
+  if (appDb && testDb.toLowerCase() === appDb.toLowerCase()) {
+    throw new Error(
+      `SAFETY_ABORT: Target test database "${testDb}" matches application database name "${appDb}".`
+    );
+  }
+
+  const directDb = extractDatabaseName(directUrl);
+  if (directDb && testDb.toLowerCase() === directDb.toLowerCase()) {
+    throw new Error(
+      `SAFETY_ABORT: Target test database "${testDb}" matches direct database name "${directDb}".`
+    );
+  }
+
+  assertTestDatabase(testDb);
+
+  return testDb;
+}
+
+/**
  * Applies all migrations in lexical order to PostgreSQL and records them in _prisma_migrations.
  * Uses an advisory lock to coordinate across parallel test runners safely.
+ * Non-destructive by default: only applies migrations not yet applied.
  *
  * @param {import('@prisma/client').PrismaClient} prisma
  * @param {{ reset?: boolean, migrationsDir?: string }} [options]
@@ -84,63 +147,75 @@ export async function runPgMigrations(prisma, options = {}) {
   await prisma.$executeRawUnsafe(`SELECT pg_advisory_lock(84729103)`);
 
   try {
-    // 3. Check if _prisma_migrations exists and has all 3 migrations already applied
-    let alreadyFullyMigrated = false;
-    try {
-      const rows = await prisma.$queryRaw`
-        SELECT "migration_name" FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL
-      `;
-      const appliedNames = new Set(Array.isArray(rows) ? rows.map((r) => r.migration_name) : []);
-      if (
-        appliedNames.has('20261105000000_init') &&
-        appliedNames.has('20261108000000_sessions_rbac') &&
-        appliedNames.has('20261109000000_auth_security_hardening') &&
-        !options.reset
-      ) {
-        alreadyFullyMigrated = true;
-      }
-    } catch {
-      // _prisma_migrations table does not exist yet
-    }
-
-    if (alreadyFullyMigrated) {
-      return [];
-    }
-
-    // 4. Drop and recreate public schema for a clean, deterministic migration run
-    await prisma.$executeRawUnsafe(`DROP SCHEMA public CASCADE;`);
-    await prisma.$executeRawUnsafe(`CREATE SCHEMA public;`);
-
-    // 5. Create _prisma_migrations table
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE "_prisma_migrations" (
-        "id" VARCHAR(36) NOT NULL,
-        "checksum" VARCHAR(64) NOT NULL,
-        "finished_at" TIMESTAMPTZ,
-        "migration_name" VARCHAR(255) NOT NULL,
-        "logs" TEXT,
-        "rolled_back_at" TIMESTAMPTZ,
-        "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
-        "applied_steps_count" INTEGER NOT NULL DEFAULT 0,
-        CONSTRAINT "_prisma_migrations_pkey" PRIMARY KEY ("id")
-      );
-    `);
-
-    // 6. Discover migrations in lexical order
     const rootMigrationsDir = options.migrationsDir || path.resolve(process.cwd(), 'prisma/migrations');
     if (!fs.existsSync(rootMigrationsDir)) {
       throw new Error(`Migrations directory not found: ${rootMigrationsDir}`);
     }
 
-    const entries = fs
+    const availableMigrations = fs
       .readdirSync(rootMigrationsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort();
 
+    // 3. Check if _prisma_migrations exists and which migrations have finished
+    let appliedNames = new Set();
+    let hasMigrationsTable = false;
+    try {
+      const rows = await prisma.$queryRaw`
+        SELECT "migration_name" FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL
+      `;
+      appliedNames = new Set(Array.isArray(rows) ? rows.map((r) => r.migration_name) : []);
+      hasMigrationsTable = true;
+    } catch {
+      // _prisma_migrations table does not exist yet
+      hasMigrationsTable = false;
+    }
+
+    const allApplied = availableMigrations.length > 0 && availableMigrations.every((m) => appliedNames.has(m));
+
+    if (allApplied && !options.reset) {
+      return [];
+    }
+
+    // 4. If explicit destructive reset is requested, require explicit ALLOW_DESTRUCTIVE_PG_TESTS=1
+    if (options.reset) {
+      if (process.env.ALLOW_DESTRUCTIVE_PG_TESTS !== '1') {
+        throw new Error(
+          'SAFETY_ABORT: Destructive schema reset requested without explicit ALLOW_DESTRUCTIVE_PG_TESTS=1.'
+        );
+      }
+      await prisma.$executeRawUnsafe(`DROP SCHEMA public CASCADE;`);
+      await prisma.$executeRawUnsafe(`CREATE SCHEMA public;`);
+      hasMigrationsTable = false;
+      appliedNames.clear();
+    }
+
+    // 5. Create _prisma_migrations table if not exists
+    if (!hasMigrationsTable) {
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+          "id" VARCHAR(36) NOT NULL,
+          "checksum" VARCHAR(64) NOT NULL,
+          "finished_at" TIMESTAMPTZ,
+          "migration_name" VARCHAR(255) NOT NULL,
+          "logs" TEXT,
+          "rolled_back_at" TIMESTAMPTZ,
+          "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+          "applied_steps_count" INTEGER NOT NULL DEFAULT 0,
+          CONSTRAINT "_prisma_migrations_pkey" PRIMARY KEY ("id")
+        );
+      `);
+    }
+
+    // 6. Apply unapplied migrations in lexical order
     const appliedNow = [];
 
-    for (const migrationName of entries) {
+    for (const migrationName of availableMigrations) {
+      if (appliedNames.has(migrationName)) {
+        continue;
+      }
+
       const migrationFilePath = path.join(rootMigrationsDir, migrationName, 'migration.sql');
       if (!fs.existsSync(migrationFilePath)) {
         continue;

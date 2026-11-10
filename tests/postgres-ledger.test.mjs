@@ -4,16 +4,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PostgresCreditLedgerService } from '../src/lib/ledger/postgres-ledger-service.ts';
-import { runPgMigrations } from './helpers/pg-migrate.mjs';
+import { runPgMigrations, validatePostgresTestConnection, extractDatabaseName } from './helpers/pg-migrate.mjs';
 
-const PG_ADMIN_URL =
-  process.env.POSTGRES_ADMIN_URL ||
-  'postgresql://tasawk@localhost:5432/postgres';
+// Resolve dedicated test URL strictly - NEVER fall back to DATABASE_URL if DATABASE_URL is not _test
+const defaultLocalTest = 'postgresql://postgres:postgres@localhost:5432/shotistry_test?schema=public';
+const rawTestUrl = process.env.POSTGRES_TEST_URL || (
+  process.env.REQUIRE_POSTGRES_TESTS === '1' && process.env.DATABASE_URL?.includes('_test')
+    ? process.env.DATABASE_URL
+    : defaultLocalTest
+);
 
-const PG_TEST_URL =
-  process.env.POSTGRES_TEST_URL ||
-  process.env.DATABASE_URL ||
-  'postgresql://tasawk@localhost:5432/shotistry_audit_test?schema=public';
+let validatedTestUrl = rawTestUrl;
+try {
+  validatePostgresTestConnection({
+    testUrl: rawTestUrl,
+    appUrl: process.env.DATABASE_URL,
+    directUrl: process.env.DIRECT_URL,
+  });
+} catch (err) {
+  if (process.env.REQUIRE_POSTGRES_TESTS === '1') {
+    throw err;
+  }
+}
 
 describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () => {
   let prisma;
@@ -22,24 +34,31 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
   let pgConnectError = null;
 
   before(async () => {
-    const adminPrisma = new PrismaClient({
-      datasources: { db: { url: PG_ADMIN_URL } },
-      log: [],
-    });
-
     try {
-      await adminPrisma.$queryRaw`SELECT 1`;
-      const existingDb = await adminPrisma.$queryRaw`
-        SELECT 1 FROM pg_database WHERE datname = 'shotistry_audit_test'
-      `;
-      if (!Array.isArray(existingDb) || existingDb.length === 0) {
-        await adminPrisma.$executeRawUnsafe(`CREATE DATABASE "shotistry_audit_test"`);
+      if (process.env.POSTGRES_ADMIN_URL) {
+        const adminPrisma = new PrismaClient({
+          datasources: { db: { url: process.env.POSTGRES_ADMIN_URL } },
+          log: [],
+        });
+        try {
+          await adminPrisma.$queryRaw`SELECT 1`;
+          const dbName = extractDatabaseName(validatedTestUrl);
+          const existingDb = await adminPrisma.$queryRaw`
+            SELECT 1 FROM pg_database WHERE datname = ${dbName}
+          `;
+          if (!Array.isArray(existingDb) || existingDb.length === 0) {
+            await adminPrisma.$executeRawUnsafe(`CREATE DATABASE "${dbName}"`);
+          }
+        } catch {
+          // Ignore admin database creation error (e.g. cloud managed Postgres without superuser)
+        } finally {
+          await adminPrisma.$disconnect().catch(() => {});
+        }
       }
-      await adminPrisma.$disconnect();
 
       prisma = new PrismaClient({
         datasources: {
-          db: { url: PG_TEST_URL },
+          db: { url: validatedTestUrl },
         },
         log: [],
       });
@@ -109,11 +128,14 @@ describe('PostgreSQL Migration & ACID Concurrency Ledger Integration Tests', () 
     const expectedTables = [
       'AdminAuditLog',
       'AuthActionToken',
+      'BetaInviteCode',
+      'BetaInviteRedemption',
       'Brand',
       'CreditLedger',
       'CreditReservation',
       'GeneratedImage',
       'GenerationJob',
+      'ImageFeedback',
       'PaymentTransaction',
       'Photoshoot',
       'Product',

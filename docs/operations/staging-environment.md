@@ -24,6 +24,18 @@ Shotistry enforces strict environment classification to prevent mock leakages or
 | **Staging** | `staging` | `production` | **Disabled** (R2 required) | **Disabled** (Fails closed) | **Disabled (403)** | `postgres` / `upstash` |
 | **Production** | `production` | `production` | **Disabled** (R2 required) | **Disabled** (Fails closed) | **Disabled (403)** | `postgres` / `upstash` |
 
+### 2.1 Staging vs Test Database Isolation Invariant
+To prevent destructive test runners from mutating or dropping staging application data, Shotistry enforces a strict **Dual-Database Isolation Architecture**:
+1. **Application Staging Database (`shotistry_staging`):**
+   - Configured via `DATABASE_URL` (pooled `-pooler` endpoint) and `DIRECT_URL` (direct port 5432 endpoint).
+   - Only non-destructive, audited migrations (`prisma migrate deploy`) and safe smoke probes (`npm run smoke:pg`) may execute against this database.
+   - Destructive test runners, schema drops, and `deleteMany` operations are strictly forbidden.
+2. **Dedicated Test Database (`shotistry_staging_test`):**
+   - Configured exclusively via `POSTGRES_TEST_URL`.
+   - Must strictly end with `_test`.
+   - Test runner (`scripts/run-pg-tests.mjs`) validates that `POSTGRES_TEST_URL` does not point to `DATABASE_URL` or `DIRECT_URL`.
+   - Any attempt to run tests against the staging application database immediately terminates with a fatal `SAFETY_ABORT`.
+
 ---
 
 ## 3. Environment Variable Inventory for Staging
@@ -33,8 +45,9 @@ Shotistry enforces strict environment classification to prevent mock leakages or
 | `NODE_ENV` | Yes | `production` | Enables Next.js optimizations and strict security cookies. |
 | `SHOTISTRY_DEPLOY_ENV` | Yes | `staging` | Declares deployment environment; blocks mocks and sandbox simulations. |
 | `APP_BASE_URL` | Yes | `https://staging.shotistry.com` (or preview URL) | Base URL for email verification links and action tokens. |
-| `DATABASE_URL` | Yes | `postgresql://user:pass@ep-staging.eu-central-1.aws.neon.tech/shotistry?sslmode=require` | Pooled connection URL for serverless runtime. |
-| `DIRECT_URL` | Yes | `postgresql://user:pass@ep-staging.eu-central-1.aws.neon.tech/shotistry?sslmode=require` | Direct connection URL for `prisma migrate deploy`. |
+| `DATABASE_URL` | Yes | `postgresql://user:pass@ep-staging-pooler.eu-central-1.aws.neon.tech/shotistry_staging?sslmode=require` | Pooled connection URL for serverless application queries. |
+| `DIRECT_URL` | Yes | `postgresql://user:pass@ep-staging.eu-central-1.aws.neon.tech/shotistry_staging?sslmode=require` | Direct connection URL on port 5432 for `prisma migrate deploy`. |
+| `POSTGRES_TEST_URL` | Testing Only | `postgresql://user:pass@ep-staging.eu-central-1.aws.neon.tech/shotistry_staging_test?sslmode=require` | Dedicated isolated integration test database (strictly requires `_test` suffix; never points to staging DB). |
 | `SHOTISTRY_DB_DRIVER` | Yes | `postgres` | Enforces PostgreSQL driver and repository implementation. |
 | `ASSET_SIGNING_SECRET` | Yes | 32-byte secure random hex | Signs temporary asset download capabilities. |
 | `CRON_SECRET` | Yes | 32-byte secure random hex | Authenticates `/api/cron/*` endpoints from Vercel Cron. |

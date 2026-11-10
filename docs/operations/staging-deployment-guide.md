@@ -24,12 +24,31 @@
 
 ## 2. Infrastructure Setup & Prerequisites
 
-### 2.1 Neon PostgreSQL Provisioning
+### 2.1 Neon PostgreSQL Provisioning (Dual Database Setup)
 1. Log into Neon console (`console.neon.tech`).
-2. Create project `shotistry-staging` in region `AWS Europe (Frankfurt) / eu-central-1`.
-3. Note two connection strings from the Dashboard:
-   - **Pooled URL (`DATABASE_URL`):** `postgres://[user]:[password]@[endpoint]-pooler.eu-central-1.aws.neon.tech/neondb?pgbouncer=true&sslmode=require`
-   - **Direct URL (`DIRECT_URL`):** `postgres://[user]:[password]@[endpoint].eu-central-1.aws.neon.tech/neondb?sslmode=require`
+2. Create project `shotistry-staging` in region `AWS Europe (Frankfurt) / eu-central-1` (PostgreSQL 16).
+3. Create two distinct logical databases within the project (or independent branches):
+   - **Application Staging Database:** `shotistry_staging`
+   - **Dedicated Test Database:** `shotistry_staging_test` (strictly requires `_test` suffix)
+4. Configure the following three connection strings:
+   - **Application Pooled URL (`DATABASE_URL`):**
+     `postgresql://[user]:[password]@[endpoint]-pooler.eu-central-1.aws.neon.tech/shotistry_staging?sslmode=require`
+   - **Application Direct URL (`DIRECT_URL`):**
+     `postgresql://[user]:[password]@[endpoint].eu-central-1.aws.neon.tech/shotistry_staging?sslmode=require`
+   - **Test Isolated URL (`POSTGRES_TEST_URL`):**
+     `postgresql://[user]:[password]@[endpoint].eu-central-1.aws.neon.tech/shotistry_staging_test?sslmode=require`
+5. Deploy migrations to staging:
+   ```bash
+   npx prisma migrate deploy
+   ```
+6. Run the safe non-destructive staging smoke probe:
+   ```bash
+   npm run smoke:pg
+   ```
+7. Run the isolated PostgreSQL integration test gate:
+   ```bash
+   npm run test:pg
+   ```
 
 ### 2.2 Cloudflare R2 Storage Bucket
 1. Create R2 bucket: `shotistry-assets-staging`.
