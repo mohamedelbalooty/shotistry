@@ -3,6 +3,59 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.0] - 2026-11-10 (Phase 10: Staging Hardening, Multi-Region Paymob, Cloudflare R2, Async Jobs, Observability & Closed Beta Readiness)
+### Added
+- **Hermetic Test Environment & Verification Command (Milestone M0):**
+  - Added `tests/.env.test` and hermetic test runner `--import ./tests/helpers/env-guard.mjs` ensuring local developer `.env` placeholders never leak into unit test assertions.
+  - Added single canonical verification npm script `"verify": "npx prisma validate && npm run typecheck && npm run lint && npm test && npm run build"`.
+- **Deployment Environment Model & Health Endpoint (Milestone M1):**
+  - Added `src/lib/config/env.ts` with strict Zod schema enforcing environment classification (`production`, `staging`, `preview`, `development`, `test`).
+  - Implemented `GET /api/health` providing deep system status checks (database, storage, rate limiter) with zero credential leaks.
+- **Cloudflare R2 Object Storage & Direct Upload Intent Flow (Milestone M2):**
+  - Implemented S3-compatible R2 storage adapter (`src/lib/storage/object-storage.ts`) using `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`.
+  - Added `POST /api/assets/upload-intent` issuing time-limited presigned PUT URLs with content-type and size validation.
+  - Added `POST /api/assets/finalize` verifying file dimensions, magic-byte MIME headers, and image integrity via Sharp before activating assets.
+  - Added `GET /api/assets/url` for secure, time-limited signed delivery with cross-workspace isolation.
+  - Added `POST /api/cron/storage-cleanup` protected by `CRON_SECRET` for automated storage maintenance.
+- **Asynchronous Recoverable Generation Jobs & Reaper Cron (Milestone M3):**
+  - Decoupled photoshoot generation: `POST /api/photoshoots/generate` returns HTTP 202 Accepted with a unique `jobId` and reserves credits in escrow.
+  - Added `/api/jobs/[id]` polling endpoint with strict workspace membership checks.
+  - Added `POST /api/cron/generation-reaper` automatically reclaiming stale jobs lingering past 300 seconds and atomically releasing reserved credits (`RELEASE_FAIL_SAFE`).
+- **Gemini Interactions Client Hardening & Error Taxonomy (Milestone M4):**
+  - Added `src/lib/ai/gemini-errors.ts` classifying Gemini API errors (`TRANSIENT_5XX`, `RATE_LIMIT_429`, `INVALID_PROMPT`, `CONTENT_POLICY_VIOLATION`, `UNAUTHORIZED`).
+  - Added bounded exponential backoff with full jitter (up to 3 attempts) for transient errors and 429 rate limits.
+  - Added micro-dollar and token cost capture on `GenerationJob`.
+- **Real-World Commercial Image Quality Benchmark Specification (Milestone M5):**
+  - Created `docs/ai/benchmark/rubric.md` establishing 8 objective quality dimensions with a zero-tolerance gate on altered logos and hallucinated text.
+  - Created `docs/ai/benchmark/manifest.json` spanning 8 regional commercial product categories.
+  - Created automated benchmark runner (`scripts/benchmark/run-image-benchmark.mjs`) with strict $0 spending safety cap.
+- **Centralized Financial Configuration & Unit Economics Model (Milestone M6):**
+  - Created `src/lib/pricing/financial-config.ts` defining centralized FX rates (EG 50.0 EGP/USD, SA 3.75 SAR/USD), regional Paymob fee schedules, and VAT rules.
+  - Implemented `checkFinancialGuardrails()` and `runFxSensitivityAnalysis()` evaluating pack profitability and currency devaluation scenarios.
+- **Paymob Sandbox Multi-Region Integration & Zero-Trust Webhooks (Milestone M7):**
+  - Implemented ADR-011 architecture: Unified Checkout Intention API client (`POST /v1/intention/`) with regional config separation (`PAYMOB_EG_*`, `PAYMOB_SA_*`).
+  - Implemented zero-trust webhook intention matching: resolving transactions strictly by `specialReference` or `order.id` against database intent records, completely eliminating unsigned parameter tampering (Security Finding C5).
+  - Added compensating refund reversals (`REFUND_REVERSAL`) to the double-entry credit ledger.
+- **Transactional Email Transport Hardening (Milestone M8):**
+  - Hardened `ResendEmailTransport` with bounded retries for 5xx/429 errors and immediate fail-fast on 4xx client errors.
+  - Added deliverability guide `docs/operations/email-deliverability.md` covering DNS records (SPF, DKIM, DMARC, MX) for `mail.staging.shotistry.com`.
+- **Structured Observability, Secret Redaction & Incident Runbook (Milestone M9):**
+  - Created `src/lib/observability/request-context.ts` (Node.js `AsyncLocalStorage`) and `src/lib/observability/logger.ts`.
+  - Implemented deep recursive redaction of passwords, tokens, API keys, cookies, HMAC, S3 signatures, raw 64-hex tokens, and circular references.
+  - Replaced un-redacted `console.error` calls across all routes with structured scoped logger.
+  - Added operational admin telemetry (job queue status, payment events, stuck jobs).
+  - Created `docs/operations/incident-response.md` including Neon PITR drill instructions.
+- **Playwright Browser E2E Suite & Staging Deployment Guide (Milestone M10):**
+  - Configured `@playwright/test` (`playwright.config.ts`) with 30 E2E browser test specs in `tests/e2e/staging-smoke.spec.ts` testing ar/RTL and en/LTR across Desktop and Mobile viewports.
+  - Created `docs/operations/staging-deployment-guide.md` specifying Vercel Preview staging deployment and instant rollback procedures.
+- **Closed Beta Readiness & Operational Plan (Milestone M11):**
+  - Added invite-only registration gating (`SHOTISTRY_BETA_INVITE_REQUIRED=1`) backed by `BetaInviteCode` and `BetaInviteRedemption`.
+  - Added per-image merchant feedback API (`POST /api/images/[id]/feedback`) backed by `ImageFeedback` table with cross-workspace authorization.
+  - Added beta funnel telemetry in `AdminRepository` (`funnelMetrics`).
+  - Created `docs/business/closed-beta-plan.md` defining merchant cohort criteria, WhatsApp/email SLA, and launch exit gates.
+- **Staging Validation Audit & Release Decision Gate (Milestone M12):**
+  - Created `docs/audit/staging-validation-report.md` evaluating all 12 Go/No-Go criteria and documenting external prerequisite checklist.
+
 ## [0.4.0] - 2026-11-08 (Authentication Security Hardening, PostgreSQL 16 CI Gate, Distributed Rate Limiting & Action Tokens)
 ### Added
 - **Dual-Driver Database Repositories (Phase 1):**
