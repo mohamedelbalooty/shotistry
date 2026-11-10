@@ -5,8 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Force NODE_ENV to 'test'
+// Force NODE_ENV to 'test' and hermetic test environment
 process.env.NODE_ENV = 'test';
+process.env.SHOTISTRY_DEPLOY_ENV = 'test';
 
 // Default overrides for local unit/integration tests
 process.env.SHOTISTRY_DB_DRIVER = process.env.SHOTISTRY_DB_DRIVER || 'sqlite';

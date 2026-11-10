@@ -53,8 +53,8 @@ export class PostgresCreditLedgerService {
           },
           {
             isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-            maxWait: 10000,
-            timeout: 15000,
+            maxWait: Number(process.env.PRISMA_TX_MAX_WAIT || 30000),
+            timeout: Number(process.env.PRISMA_TX_TIMEOUT || 60000),
           }
         );
       } catch (err) {

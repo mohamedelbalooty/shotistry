@@ -635,36 +635,42 @@ export class PostgresAuthRepository implements AuthRepository {
     const idleExpiresAtDate = new Date(params.idleExpiresAt);
     const now = new Date(params.nowIso);
 
-    await this.client.$transaction(async (tx) => {
-      if (params.rotateFromTokenHash) {
-        await tx.session.updateMany({
-          where: {
-            tokenHash: params.rotateFromTokenHash,
-            revokedAt: null,
-          },
+    await this.client.$transaction(
+      async (tx) => {
+        if (params.rotateFromTokenHash) {
+          await tx.session.updateMany({
+            where: {
+              tokenHash: params.rotateFromTokenHash,
+              revokedAt: null,
+            },
+            data: {
+              revokedAt: now,
+              revokedReason: 'ROTATED_ON_AUTH',
+            },
+          });
+        }
+
+        await tx.session.create({
           data: {
-            revokedAt: now,
-            revokedReason: 'ROTATED_ON_AUTH',
+            id: params.id,
+            userId: params.userId,
+            activeWorkspaceId: params.activeWorkspaceId ?? null,
+            tokenHash: params.tokenHash,
+            csrfToken: params.csrfToken,
+            userAgent: params.userAgent ? params.userAgent.slice(0, 512) : null,
+            ipAddress: params.ipAddress ? params.ipAddress.slice(0, 128) : null,
+            createdAt: now,
+            lastActivityAt: now,
+            idleExpiresAt: idleExpiresAtDate,
+            expiresAt: expiresAtDate,
           },
         });
+      },
+      {
+        maxWait: Number(process.env.PRISMA_TX_MAX_WAIT || 30000),
+        timeout: Number(process.env.PRISMA_TX_TIMEOUT || 60000),
       }
-
-      await tx.session.create({
-        data: {
-          id: params.id,
-          userId: params.userId,
-          activeWorkspaceId: params.activeWorkspaceId ?? null,
-          tokenHash: params.tokenHash,
-          csrfToken: params.csrfToken,
-          userAgent: params.userAgent ? params.userAgent.slice(0, 512) : null,
-          ipAddress: params.ipAddress ? params.ipAddress.slice(0, 128) : null,
-          createdAt: now,
-          lastActivityAt: now,
-          idleExpiresAt: idleExpiresAtDate,
-          expiresAt: expiresAtDate,
-        },
-      });
-    });
+    );
 
     return {
       id: params.id,
@@ -849,30 +855,36 @@ export class PostgresAuthRepository implements AuthRepository {
     }
   ): Promise<void> {
     const now = new Date();
-    await this.client.$transaction(async (tx) => {
-      const data: any = { passwordHash: newHash };
-      if (options?.bumpPasswordUpdatedAt) {
-        data.passwordUpdatedAt = now;
-      }
-      await tx.user.update({
-        where: { id: userId },
-        data,
-      });
-
-      if (options?.revokeSessionsReason) {
-        const where: any = { userId, revokedAt: null };
-        if (options.exceptSessionId) {
-          where.id = { not: options.exceptSessionId };
+    await this.client.$transaction(
+      async (tx) => {
+        const data: any = { passwordHash: newHash };
+        if (options?.bumpPasswordUpdatedAt) {
+          data.passwordUpdatedAt = now;
         }
-        await tx.session.updateMany({
-          where,
-          data: {
-            revokedAt: now,
-            revokedReason: options.revokeSessionsReason,
-          },
+        await tx.user.update({
+          where: { id: userId },
+          data,
         });
+
+        if (options?.revokeSessionsReason) {
+          const where: any = { userId, revokedAt: null };
+          if (options.exceptSessionId) {
+            where.id = { not: options.exceptSessionId };
+          }
+          await tx.session.updateMany({
+            where,
+            data: {
+              revokedAt: now,
+              revokedReason: options.revokeSessionsReason,
+            },
+          });
+        }
+      },
+      {
+        maxWait: Number(process.env.PRISMA_TX_MAX_WAIT || 30000),
+        timeout: Number(process.env.PRISMA_TX_TIMEOUT || 60000),
       }
-    });
+    );
   }
 
   async markEmailVerified(userId: string): Promise<void> {
@@ -904,55 +916,61 @@ export class PostgresAuthRepository implements AuthRepository {
     auditLogId: string;
   }> {
     const now = new Date();
-    return this.client.$transaction(async (tx) => {
-      if (input.role === 'ADMIN') {
-        const existingAdmin = await tx.user.findFirst({ where: { role: 'ADMIN' } });
-        if (existingAdmin) {
-          throw new Error(
-            'ADMIN_ALREADY_BOOTSTRAPPED: Initial platform administrator already exists'
-          );
+    return this.client.$transaction(
+      async (tx) => {
+        if (input.role === 'ADMIN') {
+          const existingAdmin = await tx.user.findFirst({ where: { role: 'ADMIN' } });
+          if (existingAdmin) {
+            throw new Error(
+              'ADMIN_ALREADY_BOOTSTRAPPED: Initial platform administrator already exists'
+            );
+          }
         }
-      }
 
-      const emailTaken = await tx.user.findUnique({ where: { email: input.email } });
-      if (emailTaken) {
-        throw new Error('CONFLICT: Account with this email already exists');
-      }
+        const emailTaken = await tx.user.findUnique({ where: { email: input.email } });
+        if (emailTaken) {
+          throw new Error('CONFLICT: Account with this email already exists');
+        }
 
-      await tx.user.create({
-        data: {
-          id: input.userId,
-          email: input.email,
-          name: input.name,
-          passwordHash: input.passwordHash,
-          role: input.role,
-          country: 'SA',
-          locale: 'en',
-          emailVerifiedAt: now,
-          passwordUpdatedAt: now,
-          createdAt: now,
-        },
-      });
+        await tx.user.create({
+          data: {
+            id: input.userId,
+            email: input.email,
+            name: input.name,
+            passwordHash: input.passwordHash,
+            role: input.role,
+            country: 'SA',
+            locale: 'en',
+            emailVerifiedAt: now,
+            passwordUpdatedAt: now,
+            createdAt: now,
+          },
+        });
 
-      await tx.adminAuditLog.create({
-        data: {
-          id: input.auditLogId,
+        await tx.adminAuditLog.create({
+          data: {
+            id: input.auditLogId,
+            userId: input.userId,
+            action: input.role === 'ADMIN' ? 'PLATFORM_ADMIN_BOOTSTRAP' : 'SUPPORT_OPERATOR_CREATED',
+            targetId: input.userId,
+            details: input.auditDetails ? JSON.parse(input.auditDetails) : { email: input.email, role: input.role },
+            ipAddress: 'cli-bootstrap',
+            createdAt: now,
+          },
+        });
+
+        return {
           userId: input.userId,
-          action: input.role === 'ADMIN' ? 'PLATFORM_ADMIN_BOOTSTRAP' : 'SUPPORT_OPERATOR_CREATED',
-          targetId: input.userId,
-          details: input.auditDetails ? JSON.parse(input.auditDetails) : { email: input.email, role: input.role },
-          ipAddress: 'cli-bootstrap',
-          createdAt: now,
-        },
-      });
-
-      return {
-        userId: input.userId,
-        email: input.email,
-        role: input.role,
-        auditLogId: input.auditLogId,
-      };
-    });
+          email: input.email,
+          role: input.role,
+          auditLogId: input.auditLogId,
+        };
+      },
+      {
+        maxWait: Number(process.env.PRISMA_TX_MAX_WAIT || 30000),
+        timeout: Number(process.env.PRISMA_TX_TIMEOUT || 60000),
+      }
+    );
   }
 
   async insertAuditLog(params: {

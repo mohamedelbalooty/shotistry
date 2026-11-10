@@ -191,45 +191,51 @@ export class PostgresActionTokenRepository implements ActionTokenRepository {
     const now = new Date();
     const id = crypto.randomUUID();
 
-    return this.client.$transaction(async (tx) => {
-      await tx.authActionToken.updateMany({
-        where: {
-          userId: params.userId,
-          type: params.type,
+    return this.client.$transaction(
+      async (tx) => {
+        await tx.authActionToken.updateMany({
+          where: {
+            userId: params.userId,
+            type: params.type,
+            consumedAt: null,
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: now,
+          },
+        });
+
+        const created = await tx.authActionToken.create({
+          data: {
+            id,
+            userId: params.userId,
+            type: params.type,
+            tokenHash: params.tokenHash,
+            targetEmail: params.targetEmail ?? null,
+            createdIp: params.createdIp ?? null,
+            expiresAt: params.expiresAt,
+            createdAt: now,
+          },
+        });
+
+        return {
+          id: created.id,
+          userId: created.userId,
+          type: created.type as ActionTokenType,
+          tokenHash: created.tokenHash,
+          targetEmail: created.targetEmail,
+          expiresAt: created.expiresAt.toISOString(),
           consumedAt: null,
           revokedAt: null,
-        },
-        data: {
-          revokedAt: now,
-        },
-      });
-
-      const created = await tx.authActionToken.create({
-        data: {
-          id,
-          userId: params.userId,
-          type: params.type,
-          tokenHash: params.tokenHash,
-          targetEmail: params.targetEmail ?? null,
-          createdIp: params.createdIp ?? null,
-          expiresAt: params.expiresAt,
-          createdAt: now,
-        },
-      });
-
-      return {
-        id: created.id,
-        userId: created.userId,
-        type: created.type as ActionTokenType,
-        tokenHash: created.tokenHash,
-        targetEmail: created.targetEmail,
-        expiresAt: created.expiresAt.toISOString(),
-        consumedAt: null,
-        revokedAt: null,
-        createdIp: created.createdIp,
-        createdAt: created.createdAt.toISOString(),
-      };
-    });
+          createdIp: created.createdIp,
+          createdAt: created.createdAt.toISOString(),
+        };
+      },
+      {
+        maxWait: Number(process.env.PRISMA_TX_MAX_WAIT || 30000),
+        timeout: Number(process.env.PRISMA_TX_TIMEOUT || 60000),
+      }
+    );
   }
 
   async consumeToken(params: ConsumeTokenParams): Promise<ActionTokenRecord | null> {

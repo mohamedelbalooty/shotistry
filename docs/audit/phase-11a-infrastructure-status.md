@@ -30,7 +30,7 @@ Each prerequisite is handled sequentially under the following strict operational
 | # | Infrastructure Prerequisite | Target Branch | Status | Cost / Tier | Verification Evidence |
 |---|---|---|---|---|---|
 | **1** | **Git Baseline & Local Verification** | `phase11a/task01-baseline-verification` | **PASS** | $0 | Clean baseline verified; `npm run verify` passed; merged to `audit/production-readiness` (`8842955`). |
-| **2** | **Neon PostgreSQL 16 Staging** | `phase11a/task02-neon-postgresql` | **PARTIALLY VERIFIED (BLOCKED ON LIVE CREDS)** | Free Tier (`eu-central-1`) | Isolation & test guards hardened (10/10 tests PASS, 197 total passing tests); safe smoke script created; 0 schema drops audited; awaiting founder Neon staging URLs. |
+| **2** | **Neon PostgreSQL 16 Staging** | `phase11a/task02-neon-postgresql` | **PASS** | Free Tier (`eu-central-1`) | 2 isolated Neon projects (`shotistry-staging`, `shotistry-staging-tests`) provisioned in Frankfurt; PG 16.15; 6 migrations applied (25 tables); ACID rollback smoke probe passed; 14/14 PG integration tests passed; `npm run verify` passed. |
 | **3** | **Cloudflare R2 Object Storage** | `phase11a/task03-cloudflare-r2` | **NOT TESTED / READY** | Free Tier (10 GB storage) | S3 presigned upload intent & signed asset retrieval verified with unit tests; awaiting bucket & API token. |
 | **4** | **Resend Transactional Email** | `phase11a/task04-resend-email` | **NOT TESTED / READY** | Free Tier (3,000 emails/mo) | Hardened HTTP transport, backoff retry & zero-token logging verified; awaiting API key & staging DNS records. |
 | **5** | **Google Gemini API** | `phase11a/task05-gemini-api` | **BLOCKED ON BUDGET** | Free tier / Capped ($25 max) | Interactions API client (`gemini-3.1-flash-image`, `gemini-3-pro-image`) & cost tracker verified locally; awaiting budget approval. |
@@ -79,28 +79,62 @@ A severe architectural vulnerability was identified and resolved in the PostgreS
   4. Confirms outside the transaction that the probe record strictly does not exist (Zero Data Mutation Guarantee).
   5. Records ping latency to detect cold-start/autosuspend behavior.
 
-### 4.4 Status & External Account Dependency
-- **Technical Implementation:** **PASS (100% complete and verified locally)**.
-- **Live Connection:** **BLOCKED (Awaiting Founder Action)**.
+### 4.4 Final Task Status: PASS
+- **Technical Implementation:** **PASS (100% complete and verified)**.
+- **Cloud Provisioning & Live Verification:** **PASS (Fully provisioned, migrated, and verified against Neon Free Plan)**.
+- **External Spend:** **$0.00 (Strictly enforced)**.
 
-#### Action Required from Founder:
-1. Log into Neon console (`console.neon.tech`).
-2. Create project `shotistry-staging` in region `AWS Europe (Frankfurt) / eu-central-1` (PostgreSQL 16).
-3. Create two distinct logical databases within the project:
-   - `shotistry_staging` (application staging database)
-   - `shotistry_staging_test` (dedicated isolated test database)
-4. Add the connection strings securely into the local `.env` file (never in chat):
-   ```env
-   # Staging Application Connection (Pooled)
-   DATABASE_URL="postgresql://[user]:[password]@[endpoint]-pooler.eu-central-1.aws.neon.tech/shotistry_staging?sslmode=require"
-   
-   # Staging Migration Connection (Direct port 5432)
-   DIRECT_URL="postgresql://[user]:[password]@[endpoint].eu-central-1.aws.neon.tech/shotistry_staging?sslmode=require"
-   
-   # Isolated Integration Test Connection (Direct port 5432, ending with _test)
-   POSTGRES_TEST_URL="postgresql://[user]:[password]@[endpoint].eu-central-1.aws.neon.tech/shotistry_staging_test?sslmode=require"
-   ```
-5. Once configured, inform the agent to execute:
-   - `npx prisma migrate deploy` (to migrate `shotistry_staging` and `shotistry_staging_test`)
-   - `npm run smoke:pg` (to verify staging connectivity without mutations)
-   - `npm run test:pg` (to verify the 14 PostgreSQL socket integration tests against `POSTGRES_TEST_URL`)
+### 4.5 Live Neon Provisioning & Verification Evidence
+
+#### A. Provisioned Cloud Topology
+- **Neon Account:** `mohamedelbalooty1998@gmail.com` (Org: `org-little-hat-55690741`, Plan: `Free`)
+- **Staging Application Project (`shotistry-staging`):**
+  - Project ID: `proud-dust-22336322`
+  - Region: `aws-eu-central-1` (Frankfurt)
+  - Engine Version: `PostgreSQL 16.15 (23d2a0d)`
+  - Compute Endpoint: `ep-icy-dawn-b94dt4md` (0.25 vCPU, 5m auto-suspend)
+  - Database: `shotistry_staging`
+  - Role: `shotistry_staging_owner`
+- **Dedicated Integration Test Project (`shotistry-staging-tests`):**
+  - Project ID: `delicate-salad-76054157`
+  - Region: `aws-eu-central-1` (Frankfurt)
+  - Engine Version: `PostgreSQL 16.15 (23d2a0d)`
+  - Compute Endpoint: `ep-sweet-sun-ba7aepxc` (0.25 vCPU, 5m auto-suspend)
+  - Database: `shotistry_staging_test`
+  - Role: `shotistry_staging_test_owner`
+
+#### B. Schema Deployment & Migration Audit
+- Executed `npx prisma migrate deploy` against both staging and test databases.
+- All 6 migrations deployed cleanly with 0 errors:
+  1. `20261105000000_init`
+  2. `20261108000000_sessions_rbac`
+  3. `20261109000000_auth_security_hardening`
+  4. `20261109100000_async_generation_jobs`
+  5. `20261109120000_paymob_hardening`
+  6. `20261110000000_closed_beta_models`
+- Verified schema contains all 25 public tables.
+
+#### C. Non-Destructive Smoke Probe (`npm run smoke:pg`)
+- **Status:** **PASS**
+- Read-only queries confirmed database identity `shotistry_staging` and role `shotistry_staging_owner`.
+- Verified 25 public tables and 6 recorded migrations in `_prisma_migrations`.
+- Executed ACID rollback test: inserted temporary record into `User` inside transaction, verified read-your-own-writes inside transaction, executed intentional rollback, and verified record does not exist outside transaction (**Zero Data Mutation Guarantee**).
+
+#### D. PostgreSQL Integration Test Suite (`npm run test:pg`)
+- **Status:** **PASS (14/14 passed, 0 failed, 0 skipped)**
+- Target: strictly isolated `shotistry_staging_test` database via `POSTGRES_TEST_URL`.
+- `tests/postgres-auth.test.mjs`: 10/10 tests passed.
+- `tests/postgres-ledger.test.mjs`: 4/4 tests passed (including serializable transaction concurrency and double-entry ledger settlement).
+
+#### E. Network & WAN Resilience Hardening
+- **Windows IPv6 Blackhole Workaround:** Added `&connect_timeout=30&pool_timeout=45` to database URLs to gracefully handle Windows RFC 3484 IPv6 DNS timeout without aborting.
+- **Remote Transaction Deadlines:** Updated `PostgresCreditLedgerService`, `PostgresAuthRepository`, and `ActionTokenRepository` transactions to use configurable `PRISMA_TX_MAX_WAIT` (30s) and `PRISMA_TX_TIMEOUT` (60s) to prevent WAN latency aborts on 0.25 vCPU cloud compute.
+- **Test Concurrency:** Serialized remote test suite execution with `--test-concurrency=1` to avoid CPU throttling on free compute instances.
+
+#### F. Unified Verification Gate (`npm run verify`)
+- **Status:** **PASS (Exit code: 0)**
+- `npx prisma validate`: Schema is valid.
+- `npm run typecheck`: TypeScript strict mode passed with 0 errors.
+- `npm run lint`: Next.js ESLint passed with 0 errors.
+- `npm test`: 215 tests across 39 suites (197 passed, 0 failed, 18 skipped).
+- `next build`: Successfully compiled and optimized all 46 routes.

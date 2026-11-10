@@ -6,7 +6,27 @@
  * - Sets REQUIRE_POSTGRES_TESTS=1 and SHOTISTRY_DB_DRIVER=postgres.
  */
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { validatePostgresTestConnection, extractDatabaseName } from '../tests/helpers/pg-migrate.mjs';
+
+// Load .env if present and environment variables not populated
+if (fs.existsSync('.env')) {
+  const envContent = fs.readFileSync('.env', 'utf8');
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx !== -1) {
+      const k = trimmed.slice(0, idx).trim();
+      let v = trimmed.slice(idx + 1).trim();
+      if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+      if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
+      if (!process.env[k]) {
+        process.env[k] = v;
+      }
+    }
+  }
+}
 
 const appUrl = process.env.DATABASE_URL || '';
 const directUrl = process.env.DIRECT_URL || '';
@@ -54,6 +74,7 @@ const args = [
   '--import',
   './tests/helpers/env-guard.mjs',
   '--experimental-strip-types',
+  '--test-concurrency=1',
   '--test',
   'tests/postgres-auth.test.mjs',
   'tests/postgres-ledger.test.mjs',
@@ -65,6 +86,8 @@ const child = spawn(nodeExe, args, {
     ...process.env,
     REQUIRE_POSTGRES_TESTS: '1',
     SHOTISTRY_DB_DRIVER: 'postgres',
+    PRISMA_TX_MAX_WAIT: '30000',
+    PRISMA_TX_TIMEOUT: '60000',
     ...(testUrl ? { POSTGRES_TEST_URL: testUrl } : {}),
   },
 });

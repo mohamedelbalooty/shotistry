@@ -10,6 +10,26 @@
  */
 import { PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+// Load .env if present and environment variables not populated
+if (fs.existsSync('.env')) {
+  const envContent = fs.readFileSync('.env', 'utf8');
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx !== -1) {
+      const k = trimmed.slice(0, idx).trim();
+      let v = trimmed.slice(idx + 1).trim();
+      if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+      if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
+      if (!process.env[k]) {
+        process.env[k] = v;
+      }
+    }
+  }
+}
 
 async function runStagingSmoke() {
   const url = process.env.DATABASE_URL;
@@ -99,30 +119,36 @@ async function runStagingSmoke() {
     let probeSeenInsideTx = false;
 
     try {
-      await prisma.$transaction(async (tx) => {
-        // Execute probe insert into AdminAuditLog
-        await tx.adminAuditLog.create({
-          data: {
-            id: probeId,
-            adminUserId: 'usr_probe_staging',
-            action: 'STAGING_NON_DESTRUCTIVE_SMOKE_PROBE',
-            targetType: 'SYSTEM',
-            metadata: JSON.stringify({ probe: true, timestamp: Date.now() }),
-          },
-        });
+      await prisma.$transaction(
+        async (tx) => {
+          // Execute probe insert into User table inside transaction
+          await tx.user.create({
+            data: {
+              id: probeId,
+              email: `${probeId}@staging-probe.internal`,
+              name: 'Staging Probe User',
+              passwordHash: 'dummy_hash_for_acid_staging_probe',
+              role: 'USER',
+            },
+          });
 
-        // Verify read-your-own-writes inside transaction
-        const found = await tx.adminAuditLog.findUnique({
-          where: { id: probeId },
-        });
+          // Verify read-your-own-writes inside transaction
+          const found = await tx.user.findUnique({
+            where: { id: probeId },
+          });
 
-        if (found && found.id === probeId) {
-          probeSeenInsideTx = true;
+          if (found && found.id === probeId) {
+            probeSeenInsideTx = true;
+          }
+
+          // Trigger intentional rollback
+          throw new Error(rollbackToken);
+        },
+        {
+          maxWait: 15000,
+          timeout: 30000,
         }
-
-        // Trigger intentional rollback
-        throw new Error(rollbackToken);
-      });
+      );
     } catch (err) {
       if (err.message !== rollbackToken && !err.message.includes(rollbackToken)) {
         throw err;
@@ -134,7 +160,7 @@ async function runStagingSmoke() {
     }
 
     // 4. Verify probe record does not exist outside transaction
-    const probeOutside = await prisma.adminAuditLog.findUnique({
+    const probeOutside = await prisma.user.findUnique({
       where: { id: probeId },
     });
 
