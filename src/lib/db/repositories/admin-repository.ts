@@ -52,6 +52,15 @@ export interface PaymentEventsSummary {
   refunded: number;
 }
 
+export interface BetaFunnelMetrics {
+  totalRegistrations: number;
+  verifiedUsers: number;
+  workspacesWithPhotoshoots: number;
+  workspacesWithGenerations: number;
+  payingSubscribers: number;
+  conversionRatePercent: number;
+}
+
 export interface PlatformMetricsSummary {
   totalUsers: number;
   payingSubscribers: number;
@@ -64,6 +73,7 @@ export interface PlatformMetricsSummary {
   totalImagesGenerated: number;
   jobStatusBreakdown: JobStatusBreakdown;
   paymentEventsSummary: PaymentEventsSummary;
+  funnelMetrics: BetaFunnelMetrics;
   recentJobs: AdminJobRow[];
   recentAuditLogs: Array<Record<string, unknown>>;
   systemStatus: {
@@ -286,6 +296,36 @@ export class SqliteAdminRepository implements AdminRepository {
       refunded: Number(paymentSummaryRow?.refunded ?? 0),
     };
 
+    const verifiedUsersRow = db
+      .prepare(`SELECT COUNT(*) AS count FROM "User" WHERE "emailVerifiedAt" IS NOT NULL`)
+      .get() as { count: number } | undefined;
+    const verifiedUsersCount = Number(verifiedUsersRow?.count ?? 0);
+
+    const wsWithShootsRow = db
+      .prepare(`SELECT COUNT(DISTINCT "workspaceId") AS count FROM "Photoshoot"`)
+      .get() as { count: number } | undefined;
+    const wsWithShoots = Number(wsWithShootsRow?.count ?? 0);
+
+    const wsWithGensRow = db
+      .prepare(
+        `SELECT COUNT(DISTINCT p."workspaceId") AS count
+         FROM "GenerationJob" j
+         JOIN "Photoshoot" p ON p."id" = j."photoshootId"
+         WHERE j."status" = 'COMPLETED'`
+      )
+      .get() as { count: number } | undefined;
+    const wsWithGens = Number(wsWithGensRow?.count ?? 0);
+
+    const funnelMetrics: BetaFunnelMetrics = {
+      totalRegistrations: totalUsers,
+      verifiedUsers: verifiedUsersCount,
+      workspacesWithPhotoshoots: wsWithShoots,
+      workspacesWithGenerations: wsWithGens,
+      payingSubscribers,
+      conversionRatePercent:
+        totalUsers > 0 ? Number(((payingSubscribers / totalUsers) * 100).toFixed(1)) : 0,
+    };
+
     return {
       totalUsers,
       payingSubscribers,
@@ -298,6 +338,7 @@ export class SqliteAdminRepository implements AdminRepository {
       totalImagesGenerated,
       jobStatusBreakdown,
       paymentEventsSummary,
+      funnelMetrics,
       recentJobs,
       recentAuditLogs,
       systemStatus: {
@@ -568,6 +609,33 @@ export class PostgresAdminRepository implements AdminRepository {
       refunded: refundedPayments,
     };
 
+    const verifiedUsersCount = await this.client.user.count({
+      where: { emailVerifiedAt: { not: null } },
+    });
+
+    const shootsGroupBy = await this.client.photoshoot.groupBy({
+      by: ['workspaceId'],
+    });
+    const wsWithShoots = shootsGroupBy.length;
+
+    const completedJobsRows = await this.client.generationJob.findMany({
+      where: { status: 'COMPLETED' },
+      select: { photoshoot: { select: { workspaceId: true } } },
+    });
+    const wsWithGens = new Set(
+      completedJobsRows.map((j) => j.photoshoot?.workspaceId).filter(Boolean)
+    ).size;
+
+    const funnelMetrics: BetaFunnelMetrics = {
+      totalRegistrations: totalUsers,
+      verifiedUsers: verifiedUsersCount,
+      workspacesWithPhotoshoots: wsWithShoots,
+      workspacesWithGenerations: wsWithGens,
+      payingSubscribers,
+      conversionRatePercent:
+        totalUsers > 0 ? Number(((payingSubscribers / totalUsers) * 100).toFixed(1)) : 0,
+    };
+
     return {
       totalUsers,
       payingSubscribers,
@@ -580,6 +648,7 @@ export class PostgresAdminRepository implements AdminRepository {
       totalImagesGenerated,
       jobStatusBreakdown,
       paymentEventsSummary,
+      funnelMetrics,
       recentJobs,
       recentAuditLogs: recentAuditLogs.map((log) => ({
         id: log.id,
